@@ -180,7 +180,7 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 	name := wt.Branch
 	if name == "" {
 		if wt.Detached {
-			name = "(" + short(wt.Head) + ")"
+			name = "detached " + short(wt.Head)
 		} else {
 			name = "(unknown)"
 		}
@@ -244,9 +244,6 @@ func (s *sidebar) badges(t Theme, wt *state.Worktree, now time.Time) string {
 	}
 	if !st.HasUpstream() && !st.Detached {
 		parts = append(parts, t.BadgeWarn.Render("!"))
-	}
-	if st.Detached {
-		parts = append(parts, t.BadgeWarn.Render("HEAD"))
 	}
 	if s.staleDays > 0 && !snap.LastCommit.IsZero() && now.Sub(snap.LastCommit) > time.Duration(s.staleDays)*24*time.Hour && !st.Dirty() && !wt.IsMain() {
 		parts = append(parts, t.BadgeStale.Render("zz"))

@@ -49,8 +49,8 @@ Badges on a worktree row:
 | `●N` | N changed or untracked files |
 | `↑a ↓b` | commits ahead of and behind the upstream branch |
 | `!` | no upstream configured |
+| `detached 544aa8e` (in place of a branch) | no branch checked out; press `n` to create one from that commit |
 | `⚠` | merge conflicts |
-| `HEAD` | detached HEAD |
 | `zz` | no commit in `stale_after_days` and nothing uncommitted |
 | `✗` | git failed in this worktree |
 | `5m` `3h` `2d` | age of the last activity: the newer of the last commit and the last file change |

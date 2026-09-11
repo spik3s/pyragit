@@ -279,3 +279,18 @@ func TestWorktreePathFor(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestDetachedWorktreeLabel(t *testing.T) {
+	root := fleet(t)
+	one := filepath.Join(root, "one")
+	run(t, one, "worktree", "add", "-q", "--detach", filepath.Join(root, "one-worktrees", "det"))
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store})
+	view := ansi.Strip(m.View().Content)
+	if ok, _ := regexp.MatchString(`detached [0-9a-f]{7}`, view); !ok || strings.Contains(view, "HEAD") {
+		t.Errorf("detached label wrong:\n%s", view)
+	}
+}
