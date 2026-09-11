@@ -12,6 +12,7 @@ import (
 
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
+	"github.com/spik3s/pyragit/internal/uistate"
 	"github.com/spik3s/pyragit/internal/watch"
 )
 
@@ -57,6 +58,11 @@ type App struct {
 	pendingSelect string     // worktree path to select after the next rediscovery
 	branchesFor   promptKind // what the next branchesMsg should open
 	autoFetch     time.Duration
+
+	// StatePath is where UI state (collapsed projects, selection) persists.
+	// Empty disables persistence.
+	StatePath string
+	saved     uistate.State
 }
 
 // New builds the root model.
@@ -91,9 +97,13 @@ func autoFetchCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return autoFetchMsg(t) })
 }
 
-
 func (a App) Init() tea.Cmd {
 	cmds := []tea.Cmd{loadCmd(a.cfg), tea.RequestBackgroundColor}
+	if a.StatePath != "" {
+		if st, err := uistate.Load(a.StatePath); err == nil {
+			cmds = append(cmds, func() tea.Msg { return st })
+		}
+	}
 	if d, err := a.cfg.AutoFetch(); err == nil && d > 0 {
 		cmds = append(cmds, autoFetchCmd(d))
 	}
@@ -108,6 +118,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
 		a.layout()
+		return a, nil
+	case uistate.State:
+		a.saved = msg
+		a.output.visible = msg.OutputOpen
+		a.diff.ignoreWS = msg.IgnoreWS
+		if msg.LastFilesTab >= 0 && msg.LastFilesTab <= int(tabLog) {
+			a.files.tab = filesTab(msg.LastFilesTab)
+		}
+		a.layout()
+		if a.store != nil {
+			a.applySavedSelection()
+			return a, a.onSelectionChanged()
+		}
 		return a, nil
 	case loadedMsg:
 		return a.onLoaded(msg)
@@ -290,7 +313,7 @@ func (a App) onLoaded(msg loadedMsg) (tea.Model, tea.Cmd) {
 	for _, w := range wts {
 		w.Loading = true
 	}
-	a.sidebar.rebuild(a.store)
+	a.applySavedSelection()
 	a.status = fmt.Sprintf("%d projects, %d worktrees discovered in %s", len(a.store.Projects), len(wts), msg.took.Round(time.Millisecond))
 	if a.created {
 		a.status = "wrote default config to " + a.cfgPath + " · " + a.status
@@ -552,7 +575,48 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// applySavedSelection restores collapsed projects and the selected worktree.
+func (a *App) applySavedSelection() {
+	collapsed := map[string]bool{}
+	for _, c := range a.saved.Collapsed {
+		collapsed[c] = true
+	}
+	for _, p := range a.store.Projects {
+		if collapsed[p.CommonDir] {
+			p.Collapsed = true
+		}
+	}
+	a.sidebar.rebuild(a.store)
+	if a.saved.Selected != "" {
+		for i, r := range a.sidebar.rows {
+			if r.worktree != nil && r.worktree.Path == a.saved.Selected {
+				a.sidebar.cursor = i
+				a.sidebar.clamp()
+				break
+			}
+		}
+	}
+}
+
+// persist writes UI state to disk when persistence is enabled.
+func (a App) persist() {
+	if a.StatePath == "" || a.store == nil {
+		return
+	}
+	st := uistate.State{OutputOpen: a.output.visible, IgnoreWS: a.diff.ignoreWS, LastFilesTab: int(a.files.tab)}
+	for _, p := range a.store.Projects {
+		if p.Collapsed {
+			st.Collapsed = append(st.Collapsed, p.CommonDir)
+		}
+	}
+	if w := a.sidebar.selectedWorktree(); w != nil {
+		st.Selected = w.Path
+	}
+	_ = uistate.Save(a.StatePath, st)
+}
+
 func (a App) quit() (tea.Model, tea.Cmd) {
+	a.persist()
 	if a.op != nil && a.op.running {
 		a.op.cancel()
 	}

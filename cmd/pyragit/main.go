@@ -14,12 +14,21 @@ import (
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
 	"github.com/spik3s/pyragit/internal/ui"
+	"github.com/spik3s/pyragit/internal/uistate"
 )
+
+// version is set by goreleaser via ldflags.
+var version = "dev"
 
 func main() {
 	dump := flag.Bool("dump", false, "print discovered projects and worktree status as text, then exit")
 	cfgPath := flag.String("config", config.Path(), "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("pyragit", version)
+		return
+	}
 
 	cwd, _ := os.Getwd()
 	cfg, created, err := config.Load(*cfgPath, cwd)
@@ -33,6 +42,7 @@ func main() {
 	}
 
 	app := ui.New(cfg, *cfgPath, created)
+	app.StatePath = uistate.Path()
 	if _, err := tea.NewProgram(app).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "pyragit:", err)
 		os.Exit(1)

@@ -1,0 +1,23 @@
+version: 2
+project_name: pyragit
+builds:
+  - main: ./cmd/pyragit
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: checksums.txt
+changelog:
+  use: github
+  sort: asc
+brews:
+  - repository:
+      owner: spik3s
+      name: homebrew-tap
+    homepage: https://github.com/spik3s/pyragit
+    description: Terminal UI for many git projects and their worktrees
+    skip_upload: auto
