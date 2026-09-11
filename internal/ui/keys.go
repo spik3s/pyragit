@@ -1,0 +1,33 @@
+package ui
+
+// Key names as produced by tea.KeyPressMsg.String().
+const (
+	keyQuit      = "q"
+	keyCtrlC     = "ctrl+c"
+	keyHelp      = "?"
+	keyTab       = "tab"
+	keyShiftTab  = "shift+tab"
+	keyUp        = "up"
+	keyDown      = "down"
+	keyJ         = "j"
+	keyK         = "k"
+	keyH         = "h"
+	keyL         = "l"
+	keyLeft      = "left"
+	keyRight     = "right"
+	keyEnter     = "enter"
+	keySpace     = "space"
+	keyEsc       = "esc"
+	keyRefresh   = "r"
+	keyRefreshAl = "R"
+	keyTop       = "g"
+	keyBottom    = "G"
+	keyHalfDown  = "d"
+	keyHalfUp    = "u"
+	keyTab1      = "1"
+	keyTab2      = "2"
+	keyTab3      = "3"
+	keyWS        = "w"
+	keyFilter    = "/"
+	keyCollapse  = "z"
+)
