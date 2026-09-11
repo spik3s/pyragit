@@ -559,6 +559,18 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.sidebar.filtering = true
 		a.focus = paneSidebar
 		return a, nil
+	case keyPin:
+		if p := a.sidebar.selectedProject(); p != nil {
+			p.Pinned = !p.Pinned
+			if p.Pinned {
+				a.status = "pinned " + p.Name
+			} else {
+				a.status = "unpinned " + p.Name
+			}
+			a.sidebar.rebuild(a.store)
+			a.persist()
+		}
+		return a, nil
 	}
 	// Action keys apply everywhere except where a pane uses the same key.
 	if act := actionByKey(k); act != nil && !(a.focus == paneDiff && (k == "d" || k == "u")) {
@@ -587,9 +599,16 @@ func (a *App) applySavedSelection() {
 	for _, c := range a.saved.Collapsed {
 		collapsed[c] = true
 	}
+	pinned := map[string]bool{}
+	for _, c := range a.saved.Pinned {
+		pinned[c] = true
+	}
 	for _, p := range a.store.Projects {
 		if collapsed[p.CommonDir] {
 			p.Collapsed = true
+		}
+		if pinned[p.CommonDir] {
+			p.Pinned = true
 		}
 	}
 	a.sidebar.rebuild(a.store)
@@ -613,6 +632,9 @@ func (a App) persist() {
 	for _, p := range a.store.Projects {
 		if p.Collapsed {
 			st.Collapsed = append(st.Collapsed, p.CommonDir)
+		}
+		if p.Pinned {
+			st.Pinned = append(st.Pinned, p.CommonDir)
 		}
 	}
 	if w := a.sidebar.selectedWorktree(); w != nil {

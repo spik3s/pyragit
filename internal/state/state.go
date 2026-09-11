@@ -51,6 +51,7 @@ type Project struct {
 	discovery.Project
 	BaseBranch string
 	Collapsed  bool
+	Pinned     bool // shown at the top of the list
 	Worktrees  []*Worktree
 }
 
@@ -122,6 +123,7 @@ func (s *Store) Replace(projects []discovery.Project, baseFor func(discovery.Pro
 	for _, p := range n.Projects {
 		if op := oldProjects[p.CommonDir]; op != nil {
 			p.Collapsed = op.Collapsed
+			p.Pinned = op.Pinned
 			if op.BaseBranch != "" {
 				p.BaseBranch = op.BaseBranch
 			}

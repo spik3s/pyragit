@@ -12,6 +12,7 @@ import (
 // State is what gets saved.
 type State struct {
 	Collapsed    []string `json:"collapsed"`   // project common dirs
+	Pinned       []string `json:"pinned"`      // project common dirs kept at the top
 	Selected     string   `json:"selected"`    // worktree path
 	OutputOpen   bool     `json:"output_open"` // output pane visible
 	IgnoreWS     bool     `json:"ignore_ws"`   // diff ignores whitespace

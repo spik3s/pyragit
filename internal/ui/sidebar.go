@@ -39,7 +39,19 @@ func (s *sidebar) rebuild(store *state.Store) {
 	}
 	s.rows = s.rows[:0]
 	q := strings.ToLower(s.filter)
+	// Pinned projects first, keeping the store's alphabetical order within each group.
+	ordered := make([]*state.Project, 0, len(store.Projects))
 	for _, p := range store.Projects {
+		if p.Pinned {
+			ordered = append(ordered, p)
+		}
+	}
+	for _, p := range store.Projects {
+		if !p.Pinned {
+			ordered = append(ordered, p)
+		}
+	}
+	for _, p := range ordered {
 		var wts []*state.Worktree
 		for _, w := range p.Worktrees {
 			if q == "" || strings.Contains(strings.ToLower(p.Name), q) || strings.Contains(strings.ToLower(w.Branch), q) {
@@ -166,6 +178,9 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 		text = fmt.Sprintf("%s %s", arrow, r.project.Name)
 		if n := len(r.project.Worktrees); n > 1 {
 			text += t.Dim.Render(fmt.Sprintf(" (%d)", n))
+		}
+		if r.project.Pinned {
+			text += " " + t.BadgeDirty.Render("★")
 		}
 		text = padRight(ansi.Truncate(text, w, "…"), w)
 		if selected {

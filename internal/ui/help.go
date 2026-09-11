@@ -14,6 +14,7 @@ var helpRows = [][2]string{
 	{"h/l ←/→", "previous / next pane"},
 	{"enter", "open selection in next pane"},
 	{"space / z", "collapse project"},
+	{"*", "pin / unpin project to the top"},
 	{"1 / 2 / 3", "Changes / vs Base / Log tab"},
 	{"w", "toggle ignore whitespace"},
 	{"b", "set base branch for project"},

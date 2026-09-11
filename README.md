@@ -76,6 +76,7 @@ Commander style. The full list:
 | `tab` `shift+tab` `h` `l` | change focused pane |
 | `enter` | open the selection in the next pane |
 | `space` `z` | collapse or expand a project |
+| `*` | pin or unpin a project so it stays at the top of the list |
 | `1` `2` `3` | Changes, vs Base, Log tab |
 | `d` `u` | half page down or up in the diff |
 | `w` | toggle whitespace-insensitive diff |

@@ -12,7 +12,7 @@ type keyHint struct{ key, label string }
 var (
 	sidebarHints = []keyHint{
 		{"f", "Fetch"}, {"p", "Pull"}, {"P", "Push"}, {"c", "Checkout"}, {"n", "Branch"},
-		{"N", "New wt"}, {"D", "Remove"}, {"b", "Base"}, {"s", "Shell"}, {"e", "Edit"},
+		{"N", "New wt"}, {"D", "Remove"}, {"b", "Base"}, {"*", "Pin"}, {"s", "Shell"}, {"e", "Edit"},
 		{"/", "Filter"}, {":", "More"},
 	}
 	filesHints = []keyHint{

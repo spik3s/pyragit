@@ -15,6 +15,7 @@ import (
 
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
+	"github.com/spik3s/pyragit/internal/uistate"
 	"github.com/spik3s/pyragit/internal/watch"
 )
 
@@ -307,5 +308,51 @@ func TestDetachedWorktreeLabel(t *testing.T) {
 	view := ansi.Strip(m.View().Content)
 	if ok, _ := regexp.MatchString(`detached [0-9a-f]{7}`, view); !ok || strings.Contains(view, "HEAD") {
 		t.Errorf("detached label wrong:\n%s", view)
+	}
+}
+
+func TestPinProject(t *testing.T) {
+	root := fleet(t)
+	two := filepath.Join(root, "two")
+	os.MkdirAll(two, 0o755)
+	run(t, two, "init", "-q", "-b", "main")
+	run(t, two, "commit", "-q", "--allow-empty", "-m", "init")
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	app.StatePath = statePath
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store})
+	view := ansi.Strip(m.View().Content)
+	if strings.Index(view, "one") > strings.Index(view, "two") {
+		t.Fatalf("expected alphabetical order first:\n%s", view)
+	}
+	// Move to "two" (rows: one, main, feat, two) and pin it.
+	m = drive(t, m, key("G"), key("*"))
+	view = ansi.Strip(m.View().Content)
+	if strings.Index(view, "two ★") > strings.Index(view, "▾ one") || !strings.Contains(view, "pinned two") {
+		t.Errorf("pinned project not at top:\n%s", view)
+	}
+	data, _ := os.ReadFile(statePath)
+	if !strings.Contains(string(data), filepath.Join(two, ".git")) {
+		t.Errorf("pin not persisted:\n%s", data)
+	}
+	// Restart with the saved state: pin is restored.
+	app2 := New(cfg, "/dev/null", false)
+	app2.noWatch = true
+	app2.StatePath = statePath
+	store2, _ := state.Load(context.Background(), cfg)
+	saved, _ := uistate.Load(statePath)
+	m2 := drive(t, app2, tea.WindowSizeMsg{Width: 120, Height: 24}, saved, loadedMsg{store: store2})
+	view = ansi.Strip(m2.View().Content)
+	if strings.Index(view, "two ★") > strings.Index(view, "▾ one") {
+		t.Errorf("pin not restored:\n%s", view)
+	}
+	// Unpin returns to alphabetical order.
+	m2 = drive(t, m2, key("g"), key("*"))
+	view = ansi.Strip(m2.View().Content)
+	if strings.Contains(view, "★") || strings.Index(view, "▾ one") > strings.Index(view, "▾ two") {
+		t.Errorf("unpin failed:\n%s", view)
 	}
 }

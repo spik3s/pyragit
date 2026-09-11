@@ -30,6 +30,7 @@ const (
 	keyWS        = "w"
 	keyFilter    = "/"
 	keyCollapse  = "z"
+	keyPin       = "*"
 	keyPalette   = ":"
 	keyPalette2  = "ctrl+p"
 )
