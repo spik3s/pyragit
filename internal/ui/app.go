@@ -278,7 +278,7 @@ func (a *App) layout() {
 	if a.width == 0 || a.height == 0 {
 		return
 	}
-	bodyH := a.height - 1 // status bar
+	bodyH := a.height - 2 // status bar + key bar
 	if a.output.visible {
 		oh := clamp(a.height/4, 5, 12)
 		a.output.resize(a.width, oh)
@@ -718,6 +718,8 @@ func (a App) onDiffKey(k string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.diff.vp.GotoTop()
 	case keyBottom:
 		a.diff.vp.GotoBottom()
+	case keyEnter:
+		a.focus = paneFiles
 	case keySpace, "pgdown":
 		a.diff.vp.ScrollDown(a.diff.vp.Height())
 	case "pgup":
@@ -735,11 +737,11 @@ func (a App) View() tea.View {
 		return v
 	}
 	if a.showHelp {
-		v.SetContent(helpView(a.theme, a.width, a.height))
+		v.SetContent(helpView(a.theme, a.width, a.height-1) + "\n" + a.keyBar())
 		return v
 	}
 	if a.prompt.active {
-		v.SetContent(a.prompt.view(a.theme, a.width, a.height))
+		v.SetContent(a.prompt.view(a.theme, a.width, a.height-1) + "\n" + a.keyBar())
 		return v
 	}
 	now := time.Now()
@@ -751,14 +753,14 @@ func (a App) View() tea.View {
 	if a.output.visible {
 		body += "\n" + a.output.view(a.theme, false)
 	}
-	v.SetContent(body + "\n" + a.statusBar())
+	v.SetContent(body + "\n" + a.statusBar() + "\n" + a.keyBar())
 	return v
 }
 
 func (a App) statusBar() string {
 	t := a.theme
-	right := t.Key.Render(":") + t.Dim.Render(" commands  ") + t.Key.Render("?") + t.Dim.Render(" help  ") + t.Key.Render("q") + t.Dim.Render(" quit")
-	avail := a.width - lipgloss.Width(right) - 1
+	right := ""
+	avail := a.width - 1
 
 	// Pieces in priority order; the path is shortened first when space runs out.
 	var head []string

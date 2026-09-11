@@ -62,6 +62,9 @@ commit.
 
 ## Keys
 
+The bottom line lists the most useful keys for the focused pane, Norton
+Commander style. The full list:
+
 | Key | Action |
 |---|---|
 | `j` `k` `g` `G` | move in the focused pane |
