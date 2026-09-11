@@ -40,11 +40,51 @@ func padRight(s string, w int) string {
 	return s
 }
 
+func padLeft(s string, w int) string {
+	if d := w - ansi.StringWidth(s); d > 0 {
+		return strings.Repeat(" ", d) + s
+	}
+	return s
+}
+
 func short(hash string) string {
 	if len(hash) > 7 {
 		return hash[:7]
 	}
 	return hash
+}
+
+// smartTime renders a time compactly: clock time if today, month/day and
+// clock time if this year, otherwise the date. Zero times render empty.
+func smartTime(t, now time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	t = t.Local()
+	switch {
+	case t.Year() == now.Year() && t.YearDay() == now.YearDay():
+		return t.Format("15:04")
+	case t.Year() == now.Year():
+		return t.Format("Jan 2 15:04")
+	}
+	return t.Format("2006-01-02")
+}
+
+// absTime renders a full timestamp for the status bar.
+func absTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
+}
+
+// ago renders a relative age as a phrase: "just now", "3h ago".
+func ago(t time.Time) string {
+	r := strings.TrimSpace(relTime(t))
+	if r == "now" {
+		return "just now"
+	}
+	return r + " ago"
 }
 
 // relTime renders a compact relative age like "3h", "2d", "5w".

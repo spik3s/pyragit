@@ -71,6 +71,12 @@ func TestLoadAndRefreshAll(t *testing.T) {
 	if feat.Snap.AheadBase != 1 || feat.Snap.BehindBase != 0 || feat.Snap.Status.UntrackedCount() != 1 || feat.Snap.LastCommit.IsZero() {
 		t.Errorf("feat snapshot: %+v", feat.Snap)
 	}
+	if mt := feat.Snap.FileTimes["dirty.txt"]; mt.IsZero() || feat.Snap.LastChange != mt || feat.Snap.LastActivity() != mt {
+		t.Errorf("file times: %+v lastChange=%v activity=%v", feat.Snap.FileTimes, feat.Snap.LastChange, feat.Snap.LastActivity())
+	}
+	if main := s.Get(filepath.Join(root, "one")); !main.Snap.LastActivity().Equal(main.Snap.LastCommit) {
+		t.Errorf("clean worktree activity should be last commit: %+v", main.Snap)
+	}
 	main := s.Get(filepath.Join(root, "one"))
 	if main.Snap.AheadBase != 0 || main.Snap.Status.Dirty() {
 		t.Errorf("main snapshot: %+v", main.Snap)

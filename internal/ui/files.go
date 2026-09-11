@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -37,7 +38,9 @@ type fileEntry struct {
 	path   string
 	mode   git.DiffMode // for tabChanges
 	status byte
-	hash   string // for tabLog
+	hash   string    // for tabLog
+	when   time.Time // file mtime or commit time; rendered as a right column
+	author string    // for tabLog
 }
 
 // filesPane lists changed files or commits for the selected worktree.
@@ -69,21 +72,22 @@ func (f *filesPane) setChanges(wt *state.Worktree) {
 	st := wt.Snap.Status
 	var conflicts, staged, unstaged, untracked []fileEntry
 	for _, fs := range st.Files {
+		when := wt.Snap.FileTimes[fs.Path]
 		switch {
 		case fs.Conflict:
-			conflicts = append(conflicts, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUnstaged, status: 'U'})
+			conflicts = append(conflicts, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUnstaged, status: 'U', when: when})
 		case fs.Untracked:
-			untracked = append(untracked, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUntracked, status: '?'})
+			untracked = append(untracked, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUntracked, status: '?', when: when})
 		default:
 			if fs.Staged != '.' {
 				label := fs.Path
 				if fs.OrigPath != "" {
 					label = fs.OrigPath + " → " + fs.Path
 				}
-				staged = append(staged, fileEntry{label: label, path: fs.Path, mode: git.DiffStaged, status: fs.Staged})
+				staged = append(staged, fileEntry{label: label, path: fs.Path, mode: git.DiffStaged, status: fs.Staged, when: when})
 			}
 			if fs.Unstaged != '.' {
-				unstaged = append(unstaged, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUnstaged, status: fs.Unstaged})
+				unstaged = append(unstaged, fileEntry{label: fs.Path, path: fs.Path, mode: git.DiffUnstaged, status: fs.Unstaged, when: when})
 			}
 		}
 	}
@@ -139,8 +143,8 @@ func (f *filesPane) setCommits(wt *state.Worktree, base string, commits []git.Co
 	}
 	for _, c := range commits {
 		f.entries = append(f.entries, fileEntry{
-			label: fmt.Sprintf("%s %s %s", c.Short, relTime(c.When), c.Subject),
-			hash:  c.Hash, status: 'c',
+			label: fmt.Sprintf("%s %s", c.Short, c.Subject),
+			hash:  c.Hash, status: 'c', when: c.When, author: c.Author,
 		})
 	}
 	f.cursor, f.offset = 0, 0
@@ -218,22 +222,38 @@ func (f *filesPane) view(t Theme, focused bool) string {
 	}
 	lines := []string{padRight(ansi.Truncate(strings.Join(tabs, "  "), w, ""), w)}
 	inner := f.innerHeight()
+	now := time.Now()
+	// Width of the time column: widest rendered time among visible entries.
+	timeW := 0
+	for i := f.offset; i < len(f.entries) && i < f.offset+inner; i++ {
+		if tw := ansi.StringWidth(smartTime(f.entries[i].when, now)); tw > timeW {
+			timeW = tw
+		}
+	}
 	for i := f.offset; i < len(f.entries) && len(lines) < inner+1; i++ {
 		e := f.entries[i]
 		var line string
 		if e.header {
 			line = t.Title.Render(padRight(ansi.Truncate(e.label, w, "…"), w))
 		} else {
-			mark := statusMark(t, e.status)
-			text := padRight(ansi.Truncate(e.label, w-2, "…"), w-2)
+			labelW := w - 2
+			when := smartTime(e.when, now)
+			if timeW > 0 && labelW-timeW-1 >= 8 {
+				labelW -= timeW + 1
+				when = " " + padLeft(when, timeW)
+			} else {
+				when = ""
+			}
+			text := padRight(ansi.Truncate(e.label, labelW, "…"), labelW)
 			if i == f.cursor {
+				plain := string(statusRune(e.status)) + " " + text + when
 				if focused {
-					line = t.Selected.Render(string(statusRune(e.status)) + " " + text)
+					line = t.Selected.Render(plain)
 				} else {
-					line = t.SelectedDim.Render(string(statusRune(e.status)) + " " + text)
+					line = t.SelectedDim.Render(plain)
 				}
 			} else {
-				line = mark + " " + text
+				line = statusMark(t, e.status) + " " + text + t.Dim.Render(when)
 			}
 		}
 		lines = append(lines, line)

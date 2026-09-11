@@ -186,6 +186,14 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 		}
 	}
 	badges := s.badges(t, wt, now)
+	if wt.Loaded && wt.Snap.Err == nil {
+		if age := relTime(wt.Snap.LastActivity()); strings.TrimSpace(age) != "?" {
+			if badges != "" {
+				badges += " "
+			}
+			badges += t.Dim.Render(strings.TrimSpace(age))
+		}
+	}
 	bw := ansi.StringWidth(badges)
 	nameW := w - 2 - bw
 	if bw > 0 {

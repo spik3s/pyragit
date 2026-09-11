@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -83,10 +84,15 @@ func TestAppRendersFleet(t *testing.T) {
 	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store}, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	view := ansi.Strip(m.View().Content)
 	t.Log("\n" + view)
-	for _, want := range []string{"▾ one (2)", "main", "feat", "●2", "Unstaged (1)", "Untracked (1)", "+changed", "1 Changes"} {
+	hhmm := time.Now().Format("15:04")
+	for _, want := range []string{"▾ one (2)", "main", "feat", "●2", "Unstaged (1)", "Untracked (1)", "+changed", "1 Changes",
+		"●2 ! now", "modified " + time.Now().Format("2006-01-02")} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}
+	}
+	if ok, _ := regexp.MatchString(`M a\.txt\s+`+hhmm, view); !ok {
+		t.Errorf("time column missing for a.txt:\n%s", view)
 	}
 	lines := strings.Split(view, "\n")
 	if len(lines) != 24 {
@@ -136,6 +142,10 @@ func TestBaseAndLogTabs(t *testing.T) {
 	if !strings.Contains(view, "feat: change a") || !strings.Contains(view, "ahead of main") || !strings.Contains(view, "diff --git") {
 		t.Errorf("log view wrong:\n%s", view)
 	}
+	if !strings.Contains(view, "· t · "+time.Now().Format("15:04")) || !strings.Contains(view, "committed "+time.Now().Format("2006-01-02")) {
+		t.Errorf("log times missing:\n%s", view)
+	}
+	t.Log("\n" + view)
 	// Set base branch to feat via the picker: main is now 0 ahead of feat... use main worktree.
 	m = drive(t, m, key("k"))
 	m = drive(t, m, key("b"))

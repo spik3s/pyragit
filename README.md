@@ -53,6 +53,12 @@ Badges on a worktree row:
 | `HEAD` | detached HEAD |
 | `zz` | no commit in `stale_after_days` and nothing uncommitted |
 | `✗` | git failed in this worktree |
+| `5m` `3h` `2d` | age of the last activity: the newer of the last commit and the last file change |
+
+The Changes tab shows each file's modification time and the Log tab shows
+each commit's time: clock time if today, `Sep 9 14:32` if this year, the date
+otherwise. The status bar shows the full timestamp of the selected file or
+commit.
 
 ## Keys
 

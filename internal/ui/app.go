@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
@@ -488,7 +489,7 @@ func (a *App) loadDiffForSelection() tea.Cmd {
 			return nil
 		}
 		a.diff.key = key
-		a.diff.title = short(e.hash)
+		a.diff.title = fmt.Sprintf("%s · %s · %s (%s)", short(e.hash), e.author, smartTime(e.when, time.Now()), ago(e.when))
 		a.diff.loading = true
 		return showCmd(key)
 	}
@@ -756,37 +757,74 @@ func (a App) View() tea.View {
 
 func (a App) statusBar() string {
 	t := a.theme
-	var left string
+	right := t.Key.Render(":") + t.Dim.Render(" commands  ") + t.Key.Render("?") + t.Dim.Render(" help  ") + t.Key.Render("q") + t.Dim.Render(" quit")
+	avail := a.width - lipgloss.Width(right) - 1
+
+	// Pieces in priority order; the path is shortened first when space runs out.
+	var head []string
+	if a.op != nil && a.op.running {
+		head = append(head, t.BadgeDirty.Render("⟳ "+a.op.name))
+	}
+	if a.status != "" {
+		head = append(head, a.status)
+	}
+	var extra []string
+	var path string
 	if a.loading {
-		left = "discovering repositories…"
+		head = append(head, "discovering repositories…")
 	} else if w := a.sidebar.selectedWorktree(); w != nil {
-		left = w.Path
+		path = w.Path
 		if w.Loaded && w.Snap.Err == nil {
 			st := w.Snap.Status
-			extra := []string{}
 			if st.Upstream != "" {
 				extra = append(extra, st.Upstream)
 			}
 			if w.Project.BaseBranch != "" && w.Snap.AheadBase+w.Snap.BehindBase > 0 {
 				extra = append(extra, fmt.Sprintf("vs %s +%d/-%d", w.Project.BaseBranch, w.Snap.AheadBase, w.Snap.BehindBase))
 			}
-			if len(extra) > 0 {
-				left += "  " + t.Dim.Render(strings.Join(extra, " · "))
+			if e := a.files.selected(); e != nil && !e.when.IsZero() {
+				switch a.files.tab {
+				case tabChanges:
+					extra = append(extra, "modified "+absTime(e.when))
+				case tabLog:
+					extra = append(extra, "committed "+absTime(e.when))
+				}
 			}
 		}
 	}
-	if a.status != "" {
-		left = a.status + "  " + t.Dim.Render(left)
+	headStr := strings.Join(head, "  ")
+	extraStr := strings.Join(extra, " · ")
+	used := lipgloss.Width(headStr)
+	if extraStr != "" {
+		used += lipgloss.Width(extraStr) + 2
 	}
-	if a.op != nil && a.op.running {
-		left = t.BadgeDirty.Render("⟳ "+a.op.name) + "  " + t.Dim.Render(left)
+	if path != "" {
+		room := avail - used - 2
+		if room < 12 {
+			path = ""
+		} else if lipgloss.Width(path) > room {
+			path = "…" + ansi.TruncateLeft(path, lipgloss.Width(path)-room+1, "")
+		}
 	}
-	right := t.Key.Render(":") + t.Dim.Render(" commands  ") + t.Key.Render("?") + t.Dim.Render(" help  ") + t.Key.Render("q") + t.Dim.Render(" quit")
+	left := headStr
+	if path != "" {
+		left = joinNonEmpty(left, t.Dim.Render(path))
+	}
+	if extraStr != "" {
+		left = joinNonEmpty(left, t.Dim.Render(extraStr))
+	}
 	gap := a.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
 	if gap < 1 {
-		return t.StatusBar.MaxWidth(a.width).Render(left)
+		return ansi.Truncate(left, a.width, "…")
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func joinNonEmpty(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + "  " + b
 }
 
 func clamp(v, lo, hi int) int {

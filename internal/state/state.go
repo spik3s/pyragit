@@ -4,6 +4,8 @@ package state
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -18,8 +20,18 @@ type Snapshot struct {
 	AheadBase   int // commits on this branch not on the base branch
 	BehindBase  int
 	LastCommit  time.Time
+	FileTimes   map[string]time.Time // modification time per changed path
+	LastChange  time.Time            // newest FileTimes entry
 	Err         error
 	RefreshedAt time.Time
+}
+
+// LastActivity is the newer of the last commit and the last file change.
+func (s Snapshot) LastActivity() time.Time {
+	if s.LastChange.After(s.LastCommit) {
+		return s.LastChange
+	}
+	return s.LastCommit
 }
 
 // Worktree is a git worktree plus its latest snapshot.
@@ -134,6 +146,15 @@ func Refresh(ctx context.Context, path, baseBranch string) Snapshot {
 		return snap
 	}
 	snap.Status = st
+	snap.FileTimes = make(map[string]time.Time, len(st.Files))
+	for _, f := range st.Files {
+		if fi, err := os.Stat(filepath.Join(path, f.Path)); err == nil {
+			snap.FileTimes[f.Path] = fi.ModTime()
+			if fi.ModTime().After(snap.LastChange) {
+				snap.LastChange = fi.ModTime()
+			}
+		}
+	}
 	if c, err := git.HeadCommit(ctx, path); err == nil {
 		snap.LastCommit = c.When
 	}
