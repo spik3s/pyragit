@@ -63,8 +63,8 @@ func (a App) hints() []keyHint {
 // the far right.
 func (a App) keyBar() string {
 	t := a.theme
-	// Key, then the label block starting on its first character, like "1Help".
-	render := func(h keyHint) string { return t.KeyBarKey.Render(h.key) + t.KeyBarLabel.Render(h.label+" ") }
+	// Key, a plain space, then the label block padded with two coloured cells.
+	render := func(h keyHint) string { return t.KeyBarKey.Render(h.key) + " " + t.KeyBarLabel.Render(h.label+"  ") }
 	right := make([]string, 0, len(alwaysHints))
 	for _, h := range alwaysHints {
 		right = append(right, render(h))
