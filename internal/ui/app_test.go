@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -179,5 +180,92 @@ func TestWatchEventsRefreshAndRediscover(t *testing.T) {
 	view := ansi.Strip(m.View().Content)
 	if !strings.Contains(view, "other") || !strings.Contains(view, "one (3)") {
 		t.Errorf("new worktree not discovered:\n%s", view)
+	}
+}
+
+func TestOperations(t *testing.T) {
+	tickInterval = 5 * time.Millisecond
+	t.Cleanup(func() { tickInterval = time.Second })
+	root := fleet(t)
+	one := filepath.Join(root, "one")
+	remote := filepath.Join(root, "remote.git")
+	run(t, root, "init", "-q", "--bare", remote)
+	run(t, one, "remote", "add", "origin", remote)
+	run(t, one, "push", "-q", "-u", "origin", "main")
+
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 30}, loadedMsg{store: store})
+
+	// Fetch via palette.
+	m = drive(t, m, key(":"))
+	if !strings.Contains(ansi.Strip(m.View().Content), "Command palette") {
+		t.Fatal("palette not open")
+	}
+	m = drive(t, m, key("f"), key("e"), key("t"), key("c"), key("h"), tea.KeyPressMsg{Code: tea.KeyEnter})
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "fetch one done") || !strings.Contains(view, "fetch one ✓") {
+		t.Errorf("fetch did not complete:\n%s", view)
+	}
+
+	// Commit on main and push with P.
+	os.WriteFile(filepath.Join(one, "p.txt"), []byte("p\n"), 0o644)
+	run(t, one, "add", "p.txt")
+	run(t, one, "commit", "-q", "-m", "push me")
+	m = drive(t, m, key("r"))
+	if !strings.Contains(ansi.Strip(m.View().Content), "↑1") {
+		t.Errorf("ahead badge missing:\n%s", ansi.Strip(m.View().Content))
+	}
+	m = drive(t, m, key("P"))
+	view = ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "push main done") || strings.Contains(view, "↑1") {
+		t.Errorf("push did not complete:\n%s", view)
+	}
+
+	// New worktree via N prompt, then remove it via D + confirm.
+	m = drive(t, m, key("N"))
+	m = drive(t, m, key("w"), key("i"), key("p"), tea.KeyPressMsg{Code: tea.KeyEnter})
+	view = ansi.Strip(m.View().Content)
+	wtPath := filepath.Join(root, "one-worktrees", "wip")
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Fatalf("worktree not created:\n%s", view)
+	}
+	if !strings.Contains(view, "one (3)") || !strings.Contains(view, "wip") {
+		t.Errorf("new worktree not shown/selected:\n%s", view)
+	}
+	app2 := m.(App)
+	if w := app2.sidebar.selectedWorktree(); w == nil || w.Path != wtPath {
+		t.Errorf("new worktree not selected: %+v", w)
+	}
+	m = drive(t, m, key("D"))
+	if !strings.Contains(ansi.Strip(m.View().Content), "Remove worktree wip") {
+		t.Fatalf("confirm not shown:\n%s", ansi.Strip(m.View().Content))
+	}
+	m = drive(t, m, key("y"))
+	view = ansi.Strip(m.View().Content)
+	if _, err := os.Stat(wtPath); err == nil {
+		t.Errorf("worktree not removed:\n%s", view)
+	}
+	if strings.Contains(view, "one (3)") {
+		t.Errorf("sidebar not updated after removal:\n%s", view)
+	}
+	// Main worktree cannot be removed.
+	m = drive(t, m, key("g"), key("j"), key("D"))
+	if !strings.Contains(ansi.Strip(m.View().Content), "cannot remove the main worktree") {
+		t.Errorf("main worktree guard missing:\n%s", ansi.Strip(m.View().Content))
+	}
+	t.Log("\n" + ansi.Strip(m.View().Content))
+}
+
+func TestWorktreePathFor(t *testing.T) {
+	got := worktreePathFor("", "/home/u/dev/repo", "feat/x")
+	if got != "/home/u/dev/repo-worktrees/feat/x" {
+		t.Errorf("got %q", got)
+	}
+	got = worktreePathFor("{repo}/.wt/{branch}", "/r", "b")
+	if got != "/r/.wt/b" {
+		t.Errorf("got %q", got)
 	}
 }

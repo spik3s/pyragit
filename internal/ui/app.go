@@ -51,6 +51,12 @@ type App struct {
 	watcher   *watch.Watcher
 	watchErr  string
 	noWatch   bool // tests: skip the blocking watch subscription
+
+	output        outputPane
+	op            *op
+	pendingSelect string     // worktree path to select after the next rediscovery
+	branchesFor   promptKind // what the next branchesMsg should open
+	autoFetch     time.Duration
 }
 
 // New builds the root model.
@@ -64,13 +70,34 @@ func New(cfg config.Config, cfgPath string, created bool) App {
 		sidebar: newSidebar(cfg.StaleAfterDays),
 		diff:    newDiffView(),
 		prompt:  newPrompt(),
+		output:  newOutputPane(),
 
 		mergeBase: map[string]string{},
 	}
 }
 
+type tickMsg time.Time
+
+type autoFetchMsg time.Time
+
+// tickInterval drives the elapsed-time display while an operation runs.
+var tickInterval = time.Second
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func autoFetchCmd(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return autoFetchMsg(t) })
+}
+
+
 func (a App) Init() tea.Cmd {
-	return tea.Batch(loadCmd(a.cfg), tea.RequestBackgroundColor)
+	cmds := []tea.Cmd{loadCmd(a.cfg), tea.RequestBackgroundColor}
+	if d, err := a.cfg.AutoFetch(); err == nil && d > 0 {
+		cmds = append(cmds, autoFetchCmd(d))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -112,6 +139,30 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.status = "config save failed: " + msg.err.Error()
 		}
 		return a, nil
+	case opMsg:
+		return a.onOp(opEvent(msg))
+	case tickMsg:
+		if a.op != nil && a.op.running {
+			return a, tickCmd()
+		}
+		return a, nil
+	case execDoneMsg:
+		if msg.err != nil {
+			a.status = "external command: " + msg.err.Error()
+		}
+		if w := a.sidebar.selectedWorktree(); w != nil {
+			w.Loading = true
+			return a, refreshCmd(w.Path, w.Project.BaseBranch)
+		}
+		return a, nil
+	case autoFetchMsg:
+		d, _ := a.cfg.AutoFetch()
+		next := autoFetchCmd(d)
+		if a.store == nil || (a.op != nil && a.op.running) {
+			return a, next
+		}
+		m, cmd := a.beginOp("auto-fetch", "", true, followUp{refresh: a.store.All()}, fetchAllOp(a.store.Projects))
+		return m, tea.Batch(cmd, next)
 	case tea.KeyPressMsg:
 		return a.onKey(msg)
 	}
@@ -159,6 +210,10 @@ func (a App) onBranches(msg branchesMsg) (tea.Model, tea.Cmd) {
 	for _, b := range msg.branches {
 		names = append(names, b.Name)
 	}
+	if a.branchesFor == promptCheckout {
+		cmd := a.prompt.open(promptCheckout, "Checkout branch in "+w.Branch+" worktree", names, "")
+		return a, cmd
+	}
 	cmd := a.prompt.open(promptSetBase, "Base branch for "+w.Project.Name, names, "")
 	// Preselect the current base.
 	for i, n := range a.prompt.filtered {
@@ -185,8 +240,14 @@ func (a App) onPromptResult(msg promptResultMsg) (tea.Model, tea.Cmd) {
 		}
 		a.status = "base branch for " + p.Name + " set to " + msg.value
 		return a, tea.Batch(saveConfigCmd(a.cfgPath, a.cfg), refreshAllCmd(p.Worktrees), a.onSelectionChanged())
+	case promptPalette:
+		if act := actionByLabel(msg.value); act != nil {
+			return a.runAction(act.id)
+		}
+		return a, nil
+	default:
+		return a.onActionPrompt(msg)
 	}
-	return a, nil
 }
 
 func (a *App) layout() {
@@ -194,6 +255,14 @@ func (a *App) layout() {
 		return
 	}
 	bodyH := a.height - 1 // status bar
+	if a.output.visible {
+		oh := clamp(a.height/4, 5, 12)
+		a.output.resize(a.width, oh)
+		bodyH -= oh
+	}
+	if bodyH < 5 {
+		bodyH = 5
+	}
 	sw := clamp(a.width/4, 24, 40)
 	fw := clamp(a.width/3, 30, 60)
 	if a.width < 100 {
@@ -293,6 +362,16 @@ func (a App) onRediscovered(msg rediscoveredMsg) (tea.Model, tea.Cmd) {
 	a.store.Replace(msg.projects, state.BaseResolver(context.Background(), a.cfg))
 	a.rewatch()
 	a.sidebar.rebuild(a.store)
+	if a.pendingSelect != "" {
+		for i, r := range a.sidebar.rows {
+			if r.worktree != nil && r.worktree.Path == a.pendingSelect {
+				a.sidebar.cursor = i
+				a.sidebar.clamp()
+				a.pendingSelect = ""
+				break
+			}
+		}
+	}
 	var fresh []*state.Worktree
 	for _, w := range a.store.All() {
 		if !w.Loaded && !w.Loading {
@@ -412,16 +491,21 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.onFilterKey(msg)
 	}
 	switch k {
-	case keyBase:
-		if w := a.sidebar.selectedWorktree(); w != nil {
-			return a, branchesCmd(w.Path)
+	case keyCtrlC:
+		if a.op != nil && a.op.running {
+			a.op.cancel()
+			a.status = "cancelling " + a.op.name
+			return a, nil
 		}
-		return a, nil
-	case keyCtrlC, keyQuit:
-		if a.watcher != nil {
-			a.watcher.Close()
+		return a.quit()
+	case keyQuit:
+		return a.quit()
+	case keyPalette, keyPalette2:
+		labels := make([]string, 0, len(actions))
+		for _, act := range actions {
+			labels = append(labels, paletteLabel(act))
 		}
-		return a, tea.Quit
+		return a, a.prompt.open(promptPalette, "Command palette", labels, "")
 	case keyHelp:
 		a.showHelp = true
 		return a, nil
@@ -433,23 +517,6 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case keyShiftTab, keyH, keyLeft:
 		if a.focus > 0 {
 			a.focus--
-		}
-		return a, nil
-	case keyRefresh:
-		if w := a.sidebar.selectedWorktree(); w != nil {
-			w.Loading = true
-			a.status = "refreshing " + w.Branch
-			return a, refreshCmd(w.Path, w.Project.BaseBranch)
-		}
-		return a, nil
-	case keyRefreshAl:
-		if a.store != nil {
-			wts := a.store.All()
-			for _, w := range wts {
-				w.Loading = true
-			}
-			a.status = "rediscovering and refreshing all"
-			return a, tea.Batch(rediscoverCmd(a.cfg), refreshAllCmd(wts))
 		}
 		return a, nil
 	case keyTab1, keyTab2, keyTab3:
@@ -464,6 +531,16 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.focus = paneSidebar
 		return a, nil
 	}
+	// Action keys apply everywhere except where a pane uses the same key.
+	if act := actionByKey(k); act != nil && !(a.focus == paneDiff && (k == "d" || k == "u")) {
+		switch act.id {
+		case "checkout":
+			a.branchesFor = promptCheckout
+		case "set-base":
+			a.branchesFor = promptSetBase
+		}
+		return a.runAction(act.id)
+	}
 	switch a.focus {
 	case paneSidebar:
 		return a.onSidebarKey(k)
@@ -473,6 +550,16 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.onDiffKey(k, msg)
 	}
 	return a, nil
+}
+
+func (a App) quit() (tea.Model, tea.Cmd) {
+	if a.op != nil && a.op.running {
+		a.op.cancel()
+	}
+	if a.watcher != nil {
+		a.watcher.Close()
+	}
+	return a, tea.Quit
 }
 
 func (a App) onFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -596,6 +683,9 @@ func (a App) View() tea.View {
 		a.files.view(a.theme, a.focus == paneFiles),
 		a.diff.view(a.theme, a.focus == paneDiff),
 	)
+	if a.output.visible {
+		body += "\n" + a.output.view(a.theme, false)
+	}
 	v.SetContent(body + "\n" + a.statusBar())
 	return v
 }
@@ -624,7 +714,10 @@ func (a App) statusBar() string {
 	if a.status != "" {
 		left = a.status + "  " + t.Dim.Render(left)
 	}
-	right := t.Key.Render("?") + t.Dim.Render(" help  ") + t.Key.Render("q") + t.Dim.Render(" quit")
+	if a.op != nil && a.op.running {
+		left = t.BadgeDirty.Render("⟳ "+a.op.name) + "  " + t.Dim.Render(left)
+	}
+	right := t.Key.Render(":") + t.Dim.Render(" commands  ") + t.Key.Render("?") + t.Dim.Render(" help  ") + t.Key.Render("q") + t.Dim.Render(" quit")
 	gap := a.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
 	if gap < 1 {
 		return t.StatusBar.MaxWidth(a.width).Render(left)

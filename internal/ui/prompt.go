@@ -19,6 +19,7 @@ const (
 	promptNewBranch
 	promptNewWorktree
 	promptConfirm
+	promptPalette
 )
 
 // prompt is a modal text input with an optional filterable choice list.
@@ -90,7 +91,7 @@ func (p *prompt) refilter() {
 
 // value returns the selected choice when the list has matches, else the typed text.
 func (p *prompt) value() string {
-	if len(p.filtered) > 0 && p.cursor < len(p.filtered) && (p.input.Value() == "" || p.kind == promptSetBase || p.kind == promptCheckout) {
+	if len(p.filtered) > 0 && p.cursor < len(p.filtered) && (p.input.Value() == "" || p.kind == promptSetBase || p.kind == promptCheckout || p.kind == promptPalette) {
 		return p.filtered[p.cursor]
 	}
 	return strings.TrimSpace(p.input.Value())
