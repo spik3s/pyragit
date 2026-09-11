@@ -10,7 +10,7 @@ import (
 
 // GetStatus runs `git status --porcelain=v2 --branch` in dir.
 func GetStatus(ctx context.Context, dir string) (Status, error) {
-	out, err := Run(ctx, dir, "status", "--porcelain=v2", "--branch", "--untracked-files=all")
+	out, err := Run(ctx, dir, "status", "--porcelain=v2", "--branch", "--untracked-files=normal")
 	if err != nil {
 		return Status{}, err
 	}
