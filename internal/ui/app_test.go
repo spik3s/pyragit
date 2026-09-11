@@ -86,7 +86,8 @@ func TestAppRendersFleet(t *testing.T) {
 	t.Log("\n" + view)
 	hhmm := time.Now().Format("15:04")
 	for _, want := range []string{"▾ one (2)", "main", "feat", "●2", "Unstaged (1)", "Untracked (1)", "+changed", "1 Changes",
-		"●2 ! now", "modified " + time.Now().Format("2006-01-02")} {
+		"●2 ! now", "modified " + time.Now().Format("2006-01-02"),
+		"feat · 1 unstaged · 1 untracked · no upstream · last commit just now"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}

@@ -57,6 +57,7 @@ type App struct {
 	output        outputPane
 	op            *op
 	pendingSelect string     // worktree path to select after the next rediscovery
+	lastSelected  string     // worktree path shown last; status message clears when it changes
 	branchesFor   promptKind // what the next branchesMsg should open
 	autoFetch     time.Duration
 
@@ -423,6 +424,10 @@ func (a App) onSnapshot(snap state.Snapshot) (tea.Model, tea.Cmd) {
 // kicks off loading the diff for its first entry.
 func (a *App) onSelectionChanged() tea.Cmd {
 	w := a.sidebar.selectedWorktree()
+	if w != nil && w.Path != a.lastSelected {
+		a.status = ""
+		a.lastSelected = w.Path
+	}
 	if w == nil {
 		a.files.entries = nil
 		a.files.worktree = ""
@@ -776,23 +781,7 @@ func (a App) statusBar() string {
 		head = append(head, "discovering repositories…")
 	} else if w := a.sidebar.selectedWorktree(); w != nil {
 		path = w.Path
-		if w.Loaded && w.Snap.Err == nil {
-			st := w.Snap.Status
-			if st.Upstream != "" {
-				extra = append(extra, st.Upstream)
-			}
-			if w.Project.BaseBranch != "" && w.Snap.AheadBase+w.Snap.BehindBase > 0 {
-				extra = append(extra, fmt.Sprintf("vs %s +%d/-%d", w.Project.BaseBranch, w.Snap.AheadBase, w.Snap.BehindBase))
-			}
-			if e := a.files.selected(); e != nil && !e.when.IsZero() {
-				switch a.files.tab {
-				case tabChanges:
-					extra = append(extra, "modified "+absTime(e.when))
-				case tabLog:
-					extra = append(extra, "committed "+absTime(e.when))
-				}
-			}
-		}
+		extra = worktreeSummary(w, a.files.tab, a.files.selected())
 	}
 	headStr := strings.Join(head, "  ")
 	extraStr := strings.Join(extra, " · ")
@@ -820,6 +809,84 @@ func (a App) statusBar() string {
 		return ansi.Truncate(left, a.width, "…")
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// worktreeSummary describes a worktree's state in plain words for the status
+// line. Only applicable facts are included.
+func worktreeSummary(w *state.Worktree, tab filesTab, sel *fileEntry) []string {
+	var out []string
+	switch {
+	case !w.Loaded:
+		return []string{"loading…"}
+	case w.Snap.Err != nil:
+		return []string{"error: " + w.Snap.Err.Error()}
+	}
+	st := w.Snap.Status
+	if st.Detached {
+		out = append(out, "detached at "+short(w.Head))
+	} else {
+		out = append(out, st.Branch)
+	}
+	if w.IsMain() {
+		out = append(out, "main worktree")
+	}
+	if n := st.ConflictCount(); n > 0 {
+		out = append(out, plural(n, "conflict"))
+	}
+	if n := st.StagedCount(); n > 0 {
+		out = append(out, plural(n, "staged"))
+	}
+	if n := st.UnstagedCount(); n > 0 {
+		out = append(out, plural(n, "unstaged"))
+	}
+	if n := st.UntrackedCount(); n > 0 {
+		out = append(out, plural(n, "untracked"))
+	}
+	if len(st.Files) == 0 {
+		out = append(out, "clean")
+	}
+	switch {
+	case st.Detached:
+	case !st.HasUpstream():
+		out = append(out, "no upstream")
+	case st.Ahead == 0 && st.Behind == 0:
+		out = append(out, "up to date with "+st.Upstream)
+	default:
+		var parts []string
+		if st.Ahead > 0 {
+			parts = append(parts, fmt.Sprintf("%d ahead", st.Ahead))
+		}
+		if st.Behind > 0 {
+			parts = append(parts, fmt.Sprintf("%d behind", st.Behind))
+		}
+		out = append(out, strings.Join(parts, ", ")+" "+st.Upstream)
+	}
+	if base := w.Project.BaseBranch; base != "" && base != st.Branch {
+		switch {
+		case w.Snap.AheadBase > 0 && w.Snap.BehindBase > 0:
+			out = append(out, fmt.Sprintf("%d ahead, %d behind %s", w.Snap.AheadBase, w.Snap.BehindBase, base))
+		case w.Snap.AheadBase > 0:
+			out = append(out, fmt.Sprintf("%d ahead of %s", w.Snap.AheadBase, base))
+		case w.Snap.BehindBase > 0:
+			out = append(out, fmt.Sprintf("%d behind %s", w.Snap.BehindBase, base))
+		}
+	}
+	if !w.Snap.LastCommit.IsZero() {
+		out = append(out, "last commit "+ago(w.Snap.LastCommit))
+	}
+	if sel != nil && !sel.when.IsZero() {
+		switch tab {
+		case tabChanges:
+			out = append(out, "modified "+absTime(sel.when))
+		case tabLog:
+			out = append(out, "committed "+absTime(sel.when))
+		}
+	}
+	return out
+}
+
+func plural(n int, word string) string {
+	return fmt.Sprintf("%d %s", n, word)
 }
 
 func joinNonEmpty(a, b string) string {

@@ -62,6 +62,11 @@ commit.
 
 ## Keys
 
+The line above the key bar summarises the selected worktree in words:
+branch, staged, unstaged, untracked and conflict counts, upstream state such
+as "no upstream" or "2 ahead, 1 behind origin/main", distance from the base
+branch, last commit age, and the timestamp of the selected file or commit.
+
 The bottom line lists the most useful keys for the focused pane, Norton
 Commander style. The full list:
 
