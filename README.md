@@ -42,7 +42,8 @@ hold your repositories, for example `["~/Developer"]`.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-Badges on a worktree row:
+Under each project, `◆` marks the main worktree and `├` / `└` mark linked
+worktrees. Badges on a worktree row:
 
 | Badge | Meaning |
 |---|---|

@@ -14,6 +14,7 @@ import (
 type sidebarRow struct {
 	project  *state.Project
 	worktree *state.Worktree // nil for project rows
+	last     bool            // last worktree row of its project
 }
 
 // sidebar renders the project/worktree tree.
@@ -65,8 +66,8 @@ func (s *sidebar) rebuild(store *state.Store) {
 		if p.Collapsed && q == "" {
 			continue
 		}
-		for _, w := range wts {
-			s.rows = append(s.rows, sidebarRow{project: p, worktree: w})
+		for i, w := range wts {
+			s.rows = append(s.rows, sidebarRow{project: p, worktree: w, last: i == len(wts)-1})
 		}
 	}
 	s.cursor = 0
@@ -209,15 +210,23 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 			badges += t.Dim.Render(strings.TrimSpace(age))
 		}
 	}
+	// ◆ marks the main worktree; linked worktrees hang off it as a tree.
+	prefix := "  ├ "
+	switch {
+	case wt.IsMain():
+		prefix = "  ◆ "
+	case r.last:
+		prefix = "  └ "
+	}
 	bw := ansi.StringWidth(badges)
-	nameW := w - 2 - bw
+	nameW := w - len([]rune(prefix)) - bw
 	if bw > 0 {
 		nameW--
 	}
 	if nameW < 3 {
 		nameW = 3
 	}
-	label := "  " + padRight(ansi.Truncate(name, nameW, "…"), nameW)
+	label := prefix + padRight(ansi.Truncate(name, nameW, "…"), nameW)
 	if bw > 0 {
 		label += " " + badges
 	}
