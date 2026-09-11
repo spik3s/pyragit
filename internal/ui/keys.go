@@ -30,4 +30,5 @@ const (
 	keyWS        = "w"
 	keyFilter    = "/"
 	keyCollapse  = "z"
+	keyBase      = "b"
 )

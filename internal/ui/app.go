@@ -41,6 +41,9 @@ type App struct {
 	sidebar  sidebar
 	files    filesPane
 	diff     diffView
+	prompt   prompt
+
+	mergeBase map[string]string // worktree path -> merge-base with its base branch
 }
 
 // New builds the root model.
@@ -53,6 +56,9 @@ func New(cfg config.Config, cfgPath string, created bool) App {
 		loading: true,
 		sidebar: newSidebar(cfg.StaleAfterDays),
 		diff:    newDiffView(),
+		prompt:  newPrompt(),
+
+		mergeBase: map[string]string{},
 	}
 }
 
@@ -82,8 +88,92 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return a, nil
+	case baseFilesMsg:
+		return a.onBaseFiles(msg)
+	case logMsg:
+		return a.onLog(msg)
+	case branchesMsg:
+		return a.onBranches(msg)
+	case promptResultMsg:
+		return a.onPromptResult(msg)
+	case savedConfigMsg:
+		if msg.err != nil {
+			a.status = "config save failed: " + msg.err.Error()
+		}
+		return a, nil
 	case tea.KeyPressMsg:
 		return a.onKey(msg)
+	}
+	return a, nil
+}
+
+func (a App) onBaseFiles(msg baseFilesMsg) (tea.Model, tea.Cmd) {
+	w := a.sidebar.selectedWorktree()
+	if w == nil || w.Path != msg.worktree || a.files.tab != tabBase || w.Project.BaseBranch != msg.base {
+		return a, nil
+	}
+	if msg.err != nil {
+		a.files.setMessage(w, msg.err.Error())
+		return a, a.loadDiffForSelection()
+	}
+	a.mergeBase[w.Path] = msg.mergeBase
+	a.files.setDiffFiles(w, msg.base, msg.files)
+	return a, a.loadDiffForSelection()
+}
+
+func (a App) onLog(msg logMsg) (tea.Model, tea.Cmd) {
+	w := a.sidebar.selectedWorktree()
+	if w == nil || w.Path != msg.worktree || a.files.tab != tabLog || w.Project.BaseBranch != msg.base {
+		return a, nil
+	}
+	if msg.err != nil {
+		a.files.setMessage(w, msg.err.Error())
+		return a, a.loadDiffForSelection()
+	}
+	a.mergeBase[w.Path] = msg.mergeBase
+	a.files.setCommits(w, msg.base, msg.commits)
+	return a, a.loadDiffForSelection()
+}
+
+func (a App) onBranches(msg branchesMsg) (tea.Model, tea.Cmd) {
+	w := a.sidebar.selectedWorktree()
+	if w == nil || w.Path != msg.worktree {
+		return a, nil
+	}
+	if msg.err != nil {
+		a.status = msg.err.Error()
+		return a, nil
+	}
+	names := make([]string, 0, len(msg.branches))
+	for _, b := range msg.branches {
+		names = append(names, b.Name)
+	}
+	cmd := a.prompt.open(promptSetBase, "Base branch for "+w.Project.Name, names, "")
+	// Preselect the current base.
+	for i, n := range a.prompt.filtered {
+		if n == w.Project.BaseBranch {
+			a.prompt.cursor = i
+		}
+	}
+	return a, cmd
+}
+
+func (a App) onPromptResult(msg promptResultMsg) (tea.Model, tea.Cmd) {
+	switch msg.kind {
+	case promptSetBase:
+		w := a.sidebar.selectedWorktree()
+		if w == nil {
+			return a, nil
+		}
+		p := w.Project
+		p.BaseBranch = msg.value
+		a.cfg.SetBaseBranch(p.Path, msg.value)
+		for _, wt := range p.Worktrees {
+			wt.Loading = true
+			delete(a.mergeBase, wt.Path)
+		}
+		a.status = "base branch for " + p.Name + " set to " + msg.value
+		return a, tea.Batch(saveConfigCmd(a.cfgPath, a.cfg), refreshAllCmd(p.Worktrees), a.onSelectionChanged())
 	}
 	return a, nil
 }
@@ -158,10 +248,23 @@ func (a *App) onSelectionChanged() tea.Cmd {
 	switch a.files.tab {
 	case tabChanges:
 		a.files.setChanges(w)
-	default:
-		a.files.setMessage(w, "not implemented yet")
+		return a.loadDiffForSelection()
+	case tabBase:
+		a.files.setMessage(w, "loading…")
+		a.files.title = "vs " + w.Project.BaseBranch
+		a.diff.key = diffKey{}
+		a.diff.title = ""
+		a.diff.setContent(a.theme, "")
+		return baseFilesCmd(w.Path, w.Project.BaseBranch)
+	case tabLog:
+		a.files.setMessage(w, "loading…")
+		a.files.title = "ahead of " + w.Project.BaseBranch
+		a.diff.key = diffKey{}
+		a.diff.title = ""
+		a.diff.setContent(a.theme, "")
+		return logCmd(w.Path, w.Project.BaseBranch, 200)
 	}
-	return a.loadDiffForSelection()
+	return nil
 }
 
 func (a *App) loadDiffForSelection() tea.Cmd {
@@ -182,6 +285,28 @@ func (a *App) loadDiffForSelection() tea.Cmd {
 		a.diff.title = e.path
 		a.diff.loading = true
 		return workingDiffCmd(key)
+	case tabBase:
+		mb := a.mergeBase[a.files.worktree]
+		if mb == "" {
+			return nil
+		}
+		key := diffKey{worktree: a.files.worktree, tab: a.files.tab, path: e.path, rev: mb, ignoreWS: a.diff.ignoreWS}
+		if key == a.diff.key && !a.diff.loading {
+			return nil
+		}
+		a.diff.key = key
+		a.diff.title = e.path
+		a.diff.loading = true
+		return rangeDiffCmd(key)
+	case tabLog:
+		key := diffKey{worktree: a.files.worktree, tab: a.files.tab, rev: e.hash, ignoreWS: a.diff.ignoreWS}
+		if key == a.diff.key && !a.diff.loading {
+			return nil
+		}
+		a.diff.key = key
+		a.diff.title = short(e.hash)
+		a.diff.loading = true
+		return showCmd(key)
 	}
 	return nil
 }
@@ -194,10 +319,22 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	}
+	if a.prompt.active {
+		cmd, res := a.prompt.update(msg)
+		if res != nil {
+			return a.Update(*res)
+		}
+		return a, cmd
+	}
 	if a.sidebar.filtering {
 		return a.onFilterKey(msg)
 	}
 	switch k {
+	case keyBase:
+		if w := a.sidebar.selectedWorktree(); w != nil {
+			return a, branchesCmd(w.Path)
+		}
+		return a, nil
 	case keyCtrlC, keyQuit:
 		return a, tea.Quit
 	case keyHelp:
@@ -362,6 +499,10 @@ func (a App) View() tea.View {
 	}
 	if a.showHelp {
 		v.SetContent(helpView(a.theme, a.width, a.height))
+		return v
+	}
+	if a.prompt.active {
+		v.SetContent(a.prompt.view(a.theme, a.width, a.height))
 		return v
 	}
 	now := time.Now()

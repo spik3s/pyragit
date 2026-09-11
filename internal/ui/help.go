@@ -16,6 +16,7 @@ var helpRows = [][2]string{
 	{"space / z", "collapse project"},
 	{"1 / 2 / 3", "Changes / vs Base / Log tab"},
 	{"w", "toggle ignore whitespace"},
+	{"b", "set base branch for project"},
 	{"/", "filter projects (esc clears)"},
 	{"r / R", "refresh selected / all"},
 	{"?", "toggle this help"},

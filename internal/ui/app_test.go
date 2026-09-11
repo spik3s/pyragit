@@ -107,3 +107,51 @@ func TestAppRendersFleet(t *testing.T) {
 		t.Error("help not shown")
 	}
 }
+
+func key(s string) tea.KeyPressMsg {
+	r := []rune(s)
+	return tea.KeyPressMsg{Code: r[0], Text: s}
+}
+
+func TestBaseAndLogTabs(t *testing.T) {
+	root := fleet(t)
+	feat := filepath.Join(root, "one-worktrees", "feat")
+	run(t, feat, "add", "a.txt")
+	run(t, feat, "commit", "-q", "-m", "feat: change a")
+	cfgPath := filepath.Join(t.TempDir(), "config.toml")
+	cfg := config.Default(root)
+	app := New(cfg, cfgPath, false)
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store}, key("j"), key("2"))
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "vs main") || !strings.Contains(view, "M a.txt") || !strings.Contains(view, "+changed") {
+		t.Errorf("vs base view wrong:\n%s", view)
+	}
+	m = drive(t, m, key("3"))
+	view = ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "feat: change a") || !strings.Contains(view, "ahead of main") || !strings.Contains(view, "diff --git") {
+		t.Errorf("log view wrong:\n%s", view)
+	}
+	// Set base branch to feat via the picker: main is now 0 ahead of feat... use main worktree.
+	m = drive(t, m, key("k"))
+	m = drive(t, m, key("b"))
+	view = ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "Base branch for one") || !strings.Contains(view, "feat") {
+		t.Errorf("picker not shown:\n%s", view)
+	}
+	m = drive(t, m, key("f"), tea.KeyPressMsg{Code: tea.KeyEnter})
+	view = ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "set to feat") || !strings.Contains(view, "ahead of feat") {
+		t.Errorf("base not applied:\n%s", view)
+	}
+	data, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(data), `base_branch = "feat"`) {
+		t.Errorf("config not saved:\n%s", data)
+	}
+	// Esc closes the picker without changes.
+	m = drive(t, m, key("b"))
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if strings.Contains(ansi.Strip(m.View().Content), "Base branch for") {
+		t.Error("picker did not close on esc")
+	}
+}

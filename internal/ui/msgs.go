@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -69,4 +71,93 @@ func workingDiffCmd(key diffKey) tea.Cmd {
 		out, err := git.Diff(context.Background(), key.worktree, key.path, key.mode, key.ignoreWS)
 		return diffMsg{key: key, content: out, err: err}
 	}
+}
+
+// Phase 3: branch diff and log.
+
+type baseFilesMsg struct {
+	worktree  string
+	base      string
+	mergeBase string
+	files     []git.DiffFile
+	err       error
+}
+
+type logMsg struct {
+	worktree  string
+	base      string
+	mergeBase string
+	commits   []git.Commit
+	err       error
+}
+
+type branchesMsg struct {
+	worktree string
+	branches []git.Branch
+	err      error
+}
+
+// resolveMergeBase returns the merge base of base and HEAD, or HEAD's parent
+// chain root when base is unset or missing (so the view still shows something).
+func resolveMergeBase(ctx context.Context, dir, base string) (string, error) {
+	if base == "" {
+		return "", errNoBase
+	}
+	if !git.RefExists(ctx, dir, base) {
+		return "", fmt.Errorf("base branch %q not found", base)
+	}
+	return git.MergeBase(ctx, dir, base, "HEAD")
+}
+
+var errNoBase = errors.New("no base branch configured; press b to set one")
+
+func baseFilesCmd(worktree, base string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		mb, err := resolveMergeBase(ctx, worktree, base)
+		if err != nil {
+			return baseFilesMsg{worktree: worktree, base: base, err: err}
+		}
+		files, err := git.DiffFiles(ctx, worktree, mb, "HEAD")
+		return baseFilesMsg{worktree: worktree, base: base, mergeBase: mb, files: files, err: err}
+	}
+}
+
+func logCmd(worktree, base string, limit int) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		mb, err := resolveMergeBase(ctx, worktree, base)
+		if err != nil {
+			return logMsg{worktree: worktree, base: base, err: err}
+		}
+		commits, err := git.Log(ctx, worktree, mb+"..HEAD", limit)
+		return logMsg{worktree: worktree, base: base, mergeBase: mb, commits: commits, err: err}
+	}
+}
+
+func rangeDiffCmd(key diffKey) tea.Cmd {
+	return func() tea.Msg {
+		out, err := git.DiffRange(context.Background(), key.worktree, key.rev, "HEAD", key.path, key.ignoreWS)
+		return diffMsg{key: key, content: out, err: err}
+	}
+}
+
+func showCmd(key diffKey) tea.Cmd {
+	return func() tea.Msg {
+		out, err := git.Show(context.Background(), key.worktree, key.rev, key.ignoreWS)
+		return diffMsg{key: key, content: out, err: err}
+	}
+}
+
+func branchesCmd(worktree string) tea.Cmd {
+	return func() tea.Msg {
+		bs, err := git.Branches(context.Background(), worktree)
+		return branchesMsg{worktree: worktree, branches: bs, err: err}
+	}
+}
+
+type savedConfigMsg struct{ err error }
+
+func saveConfigCmd(path string, cfg config.Config) tea.Cmd {
+	return func() tea.Msg { return savedConfigMsg{err: config.Save(path, cfg)} }
 }
