@@ -13,6 +13,7 @@ import (
 
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
+	"github.com/spik3s/pyragit/internal/watch"
 )
 
 func run(t *testing.T, dir string, args ...string) {
@@ -76,6 +77,7 @@ func TestAppRendersFleet(t *testing.T) {
 	root := fleet(t)
 	cfg := config.Default(root)
 	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
 	store, _ := state.Load(context.Background(), cfg)
 	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store}, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	view := ansi.Strip(m.View().Content)
@@ -121,6 +123,7 @@ func TestBaseAndLogTabs(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.toml")
 	cfg := config.Default(root)
 	app := New(cfg, cfgPath, false)
+	app.noWatch = true
 	store, _ := state.Load(context.Background(), cfg)
 	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store}, key("j"), key("2"))
 	view := ansi.Strip(m.View().Content)
@@ -153,5 +156,28 @@ func TestBaseAndLogTabs(t *testing.T) {
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if strings.Contains(ansi.Strip(m.View().Content), "Base branch for") {
 		t.Error("picker did not close on esc")
+	}
+}
+
+func TestWatchEventsRefreshAndRediscover(t *testing.T) {
+	root := fleet(t)
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store})
+	one := filepath.Join(root, "one")
+	// A file edit in the main worktree shows up after a worktree event.
+	os.WriteFile(filepath.Join(one, "b.txt"), []byte("b\n"), 0o644)
+	m = drive(t, m, watchEventMsg{Kind: watch.KindWorktree, Path: one})
+	if !strings.Contains(ansi.Strip(m.View().Content), "? b.txt") {
+		t.Errorf("edit not picked up:\n%s", ansi.Strip(m.View().Content))
+	}
+	// A new worktree appears after rediscovery.
+	run(t, one, "worktree", "add", "-q", "-b", "other", filepath.Join(root, "one-worktrees", "other"))
+	m = drive(t, m, watchEventMsg{Kind: watch.KindWorktreeList, Path: filepath.Join(one, ".git")})
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "other") || !strings.Contains(view, "one (3)") {
+		t.Errorf("new worktree not discovered:\n%s", view)
 	}
 }

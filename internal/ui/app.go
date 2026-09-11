@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +12,10 @@ import (
 
 	"github.com/spik3s/pyragit/internal/config"
 	"github.com/spik3s/pyragit/internal/state"
+	"github.com/spik3s/pyragit/internal/watch"
 )
+
+const watchDebounce = 300 * time.Millisecond
 
 type pane int
 
@@ -44,6 +48,9 @@ type App struct {
 	prompt   prompt
 
 	mergeBase map[string]string // worktree path -> merge-base with its base branch
+	watcher   *watch.Watcher
+	watchErr  string
+	noWatch   bool // tests: skip the blocking watch subscription
 }
 
 // New builds the root model.
@@ -96,6 +103,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.onBranches(msg)
 	case promptResultMsg:
 		return a.onPromptResult(msg)
+	case watchEventMsg:
+		return a.onWatchEvent(watch.Event(msg))
+	case rediscoveredMsg:
+		return a.onRediscovered(msg)
 	case savedConfigMsg:
 		if msg.err != nil {
 			a.status = "config save failed: " + msg.err.Error()
@@ -219,7 +230,78 @@ func (a App) onLoaded(msg loadedMsg) (tea.Model, tea.Cmd) {
 		a.status += fmt.Sprintf(" · %d errors", len(msg.errs))
 	}
 	cmd := a.onSelectionChanged()
-	return a, tea.Batch(refreshAllCmd(wts), cmd)
+	var watchCmd tea.Cmd
+	if a.watcher == nil && !a.noWatch {
+		a.watcher = watch.New(watchDebounce, a.cfg.Exclude)
+		watchCmd = waitWatchCmd(a.watcher)
+	}
+	a.rewatch()
+	return a, tea.Batch(refreshAllCmd(wts), cmd, watchCmd)
+}
+
+// rewatch points the watcher at the current set of worktrees and repos.
+func (a *App) rewatch() {
+	if a.watcher == nil || a.store == nil {
+		return
+	}
+	var wts, commons []string
+	for _, p := range a.store.Projects {
+		commons = append(commons, p.CommonDir)
+		for _, w := range p.Worktrees {
+			wts = append(wts, w.Path)
+		}
+	}
+	if err := a.watcher.Watch(wts, commons); err != nil {
+		a.watchErr = "watch: " + err.Error()
+		a.status = a.watchErr
+	}
+}
+
+func (a App) onWatchEvent(ev watch.Event) (tea.Model, tea.Cmd) {
+	var next tea.Cmd
+	if a.watcher != nil {
+		next = waitWatchCmd(a.watcher)
+	}
+	if a.store == nil {
+		return a, next
+	}
+	switch ev.Kind {
+	case watch.KindWorktree:
+		if w := a.store.Get(ev.Path); w != nil {
+			w.Loading = true
+			return a, tea.Batch(next, refreshCmd(w.Path, w.Project.BaseBranch))
+		}
+	case watch.KindProject:
+		for _, p := range a.store.Projects {
+			if p.CommonDir == ev.Path {
+				for _, w := range p.Worktrees {
+					w.Loading = true
+				}
+				return a, tea.Batch(next, refreshAllCmd(p.Worktrees))
+			}
+		}
+	case watch.KindWorktreeList:
+		return a, tea.Batch(next, rediscoverCmd(a.cfg))
+	}
+	return a, next
+}
+
+func (a App) onRediscovered(msg rediscoveredMsg) (tea.Model, tea.Cmd) {
+	if a.store == nil {
+		return a, nil
+	}
+	a.store.Replace(msg.projects, state.BaseResolver(context.Background(), a.cfg))
+	a.rewatch()
+	a.sidebar.rebuild(a.store)
+	var fresh []*state.Worktree
+	for _, w := range a.store.All() {
+		if !w.Loaded && !w.Loading {
+			w.Loading = true
+			fresh = append(fresh, w)
+		}
+	}
+	a.status = fmt.Sprintf("%d projects, %d worktrees", len(a.store.Projects), len(a.store.All()))
+	return a, tea.Batch(refreshAllCmd(fresh), a.onSelectionChanged())
 }
 
 func (a App) onSnapshot(snap state.Snapshot) (tea.Model, tea.Cmd) {
@@ -336,6 +418,9 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 	case keyCtrlC, keyQuit:
+		if a.watcher != nil {
+			a.watcher.Close()
+		}
 		return a, tea.Quit
 	case keyHelp:
 		a.showHelp = true
@@ -363,8 +448,8 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			for _, w := range wts {
 				w.Loading = true
 			}
-			a.status = "refreshing all"
-			return a, refreshAllCmd(wts)
+			a.status = "rediscovering and refreshing all"
+			return a, tea.Batch(rediscoverCmd(a.cfg), refreshAllCmd(wts))
 		}
 		return a, nil
 	case keyTab1, keyTab2, keyTab3:

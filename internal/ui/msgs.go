@@ -9,8 +9,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/spik3s/pyragit/internal/config"
+	"github.com/spik3s/pyragit/internal/discovery"
 	"github.com/spik3s/pyragit/internal/git"
 	"github.com/spik3s/pyragit/internal/state"
+	"github.com/spik3s/pyragit/internal/watch"
 )
 
 // Messages flowing into App.Update.
@@ -160,4 +162,32 @@ type savedConfigMsg struct{ err error }
 
 func saveConfigCmd(path string, cfg config.Config) tea.Cmd {
 	return func() tea.Msg { return savedConfigMsg{err: config.Save(path, cfg)} }
+}
+
+// Phase 4: live refresh.
+
+type watchEventMsg watch.Event
+
+type rediscoveredMsg struct {
+	projects []discovery.Project
+	errs     []error
+}
+
+// waitWatchCmd blocks until the watcher emits an event. Re-issue it after
+// each watchEventMsg to keep the subscription alive.
+func waitWatchCmd(w *watch.Watcher) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-w.Events()
+		if !ok {
+			return nil
+		}
+		return watchEventMsg(ev)
+	}
+}
+
+func rediscoverCmd(cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		projects, errs := discovery.Discover(context.Background(), state.DiscoverOptions(cfg))
+		return rediscoveredMsg{projects: projects, errs: errs}
+	}
 }
