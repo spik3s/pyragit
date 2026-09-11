@@ -94,7 +94,7 @@ func TestAppRendersFleet(t *testing.T) {
 	if ok, _ := regexp.MatchString(`M a\.txt\s+`+hhmm, view); !ok {
 		t.Errorf("time column missing for a.txt:\n%s", view)
 	}
-	if !strings.Contains(view, "f Fetch") || !strings.Contains(view, "N New wt") || !strings.Contains(view, "q Quit") {
+	if !strings.Contains(view, "f Fetch ") || !strings.Contains(view, "N New wt ") || !strings.Contains(view, "q Quit ") {
 		t.Errorf("sidebar key bar missing:\n%s", view)
 	}
 	lines := strings.Split(view, "\n")
@@ -113,11 +113,11 @@ func TestAppRendersFleet(t *testing.T) {
 	if !strings.Contains(view, "+new") {
 		t.Errorf("diff did not follow selection:\n%s", view)
 	}
-	if !strings.Contains(view, "↵ Diff") || !strings.Contains(view, "y Copy path") || strings.Contains(view, "f Fetch") {
+	if !strings.Contains(view, "↵ Diff ") || !strings.Contains(view, "y Copy path ") || strings.Contains(view, "f Fetch ") {
 		t.Errorf("files key bar wrong:\n%s", view)
 	}
 	m = drive(t, m, key("l"))
-	if v := ansi.Strip(m.View().Content); !strings.Contains(v, "j/k Scroll") || !strings.Contains(v, "↵ Back") {
+	if v := ansi.Strip(m.View().Content); !strings.Contains(v, "j/k Scroll ") || !strings.Contains(v, "↵ Back ") {
 		t.Errorf("diff key bar wrong:\n%s", v)
 	}
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})

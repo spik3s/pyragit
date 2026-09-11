@@ -31,6 +31,8 @@ type Theme struct {
 	BadgeBehind  lipgloss.Style
 	BadgeWarn    lipgloss.Style
 	BadgeStale   lipgloss.Style
+	KeyBarKey    lipgloss.Style
+	KeyBarLabel  lipgloss.Style
 }
 
 // NewTheme builds a theme for a dark or light background.
@@ -65,5 +67,10 @@ func NewTheme(dark bool) Theme {
 	t.BadgeBehind = lipgloss.NewStyle().Foreground(t.Info)
 	t.BadgeWarn = lipgloss.NewStyle().Foreground(t.Bad).Bold(true)
 	t.BadgeStale = lipgloss.NewStyle().Foreground(t.Muted)
+	// Norton Commander style: bare key, then the label on a coloured block.
+	t.KeyBarKey = lipgloss.NewStyle().Bold(true)
+	t.KeyBarLabel = lipgloss.NewStyle().
+		Background(c("#5f5fd7", "#5f5faf")).
+		Foreground(c("#ffffff", "#eeeeee"))
 	return t
 }

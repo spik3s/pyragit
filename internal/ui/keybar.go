@@ -63,12 +63,12 @@ func (a App) hints() []keyHint {
 // the far right.
 func (a App) keyBar() string {
 	t := a.theme
-	render := func(h keyHint) string { return t.Key.Render(h.key) + " " + t.Dim.Render(h.label) }
+	render := func(h keyHint) string { return t.KeyBarKey.Render(h.key) + t.KeyBarLabel.Render(" "+h.label+" ") }
 	right := make([]string, 0, len(alwaysHints))
 	for _, h := range alwaysHints {
 		right = append(right, render(h))
 	}
-	rightStr := strings.Join(right, "  ")
+	rightStr := strings.Join(right, " ")
 	avail := a.width - lipgloss.Width(rightStr) - 2
 	var parts []string
 	used := 0
@@ -76,7 +76,7 @@ func (a App) keyBar() string {
 		s := render(h)
 		w := lipgloss.Width(s)
 		if len(parts) > 0 {
-			w += 2
+			w++
 		}
 		if used+w > avail {
 			break
@@ -84,7 +84,7 @@ func (a App) keyBar() string {
 		parts = append(parts, s)
 		used += w
 	}
-	left := strings.Join(parts, "  ")
+	left := strings.Join(parts, " ")
 	gap := a.width - lipgloss.Width(left) - lipgloss.Width(rightStr)
 	if gap < 1 {
 		gap = 1
