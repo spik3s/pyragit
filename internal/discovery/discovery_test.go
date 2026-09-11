@@ -68,3 +68,57 @@ func TestFindRepoDirsRootIsRepo(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 }
+
+func TestDiscoverNestedAndSubmodule(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	parent := filepath.Join(root, "parent")
+	os.MkdirAll(parent, 0o755)
+	run(t, parent, "init", "-q", "-b", "main")
+	run(t, parent, "commit", "-q", "--allow-empty", "-m", "init")
+	// A plain repo nested inside the parent's working tree.
+	nested := filepath.Join(parent, "projects", "nested")
+	os.MkdirAll(nested, 0o755)
+	run(t, nested, "init", "-q", "-b", "main")
+	run(t, nested, "commit", "-q", "--allow-empty", "-m", "init")
+	// A submodule: its .git is a file pointing into parent/.git/modules.
+	src := filepath.Join(root, "sub-src")
+	os.MkdirAll(src, 0o755)
+	run(t, src, "init", "-q", "-b", "main")
+	run(t, src, "commit", "-q", "--allow-empty", "-m", "init")
+	run(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "projects/sub")
+	sub := filepath.Join(parent, "projects", "sub")
+	run(t, sub, "worktree", "add", "-q", "-b", "feat", filepath.Join(sub, ".claude", "worktrees", "feat"))
+
+	ps, errs := Discover(context.Background(), Options{Roots: []string{root}, Depth: 3})
+	if len(errs) != 0 {
+		t.Fatalf("errs: %v", errs)
+	}
+	byName := map[string]Project{}
+	for _, p := range ps {
+		byName[p.Name] = p
+	}
+	if _, ok := byName["nested"]; !ok {
+		t.Errorf("nested repo not discovered: %v", names(ps))
+	}
+	sp, ok := byName["sub"]
+	if !ok {
+		t.Fatalf("submodule not discovered: %v", names(ps))
+	}
+	if sp.Path != sub {
+		t.Errorf("submodule path = %q, want %q", sp.Path, sub)
+	}
+	if len(sp.Worktrees) != 2 || sp.Worktrees[0].Path != sub || sp.Worktrees[1].Branch != "feat" {
+		t.Errorf("submodule worktrees: %+v", sp.Worktrees)
+	}
+	if len(ps) != 4 {
+		t.Errorf("want 4 projects (parent, nested, sub, sub-src), got %v", names(ps))
+	}
+}
+
+func names(ps []Project) []string {
+	var out []string
+	for _, p := range ps {
+		out = append(out, p.Name)
+	}
+	return out
+}

@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,4 +251,32 @@ func WorktreeRemove(ctx context.Context, repoDir, path string, force bool) error
 // WorktreePrune removes stale worktree metadata and returns git's report.
 func WorktreePrune(ctx context.Context, repoDir string) (string, error) {
 	return Run(ctx, repoDir, "worktree", "prune", "--verbose")
+}
+
+// Info describes where a directory sits in a repository.
+type Info struct {
+	TopLevel  string // root of the working tree
+	GitDir    string // this worktree's git dir
+	CommonDir string // the repository's shared git dir
+}
+
+// IsMainWorktree reports whether dir is the repository's primary worktree
+// (as opposed to a linked worktree).
+func (i Info) IsMainWorktree() bool { return i.GitDir == i.CommonDir }
+
+// RepoInfo resolves TopLevel, GitDir and CommonDir for dir in one call.
+func RepoInfo(ctx context.Context, dir string) (Info, error) {
+	out, err := Run(ctx, dir, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return Info{}, err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		return Info{}, fmt.Errorf("git rev-parse: unexpected output %q", out)
+	}
+	return Info{
+		TopLevel:  filepath.Clean(lines[0]),
+		GitDir:    filepath.Clean(lines[1]),
+		CommonDir: filepath.Clean(lines[2]),
+	}, nil
 }

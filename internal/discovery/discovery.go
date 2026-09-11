@@ -45,25 +45,31 @@ func Discover(ctx context.Context, opts Options) ([]Project, []error) {
 		if ctx.Err() != nil {
 			break
 		}
-		common, err := git.CommonDir(ctx, dir)
+		info, err := git.RepoInfo(ctx, dir)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if seen[common] {
+		if seen[info.CommonDir] {
 			continue
 		}
-		seen[common] = true
+		seen[info.CommonDir] = true
 		wts, err := git.Worktrees(ctx, dir)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		p := Project{CommonDir: common, Worktrees: wts}
+		// For submodules, `git worktree list` reports the main worktree as
+		// the .git/modules/... directory. The candidate's own toplevel is
+		// authoritative when the candidate is the main worktree.
+		if len(wts) > 0 && info.IsMainWorktree() && !wts[0].Bare {
+			wts[0].Path = info.TopLevel
+		}
+		p := Project{CommonDir: info.CommonDir, Worktrees: wts}
 		if len(wts) > 0 {
 			p.Path = wts[0].Path
 		} else {
-			p.Path = dir
+			p.Path = info.TopLevel
 		}
 		p.Name = filepath.Base(p.Path)
 		projects = append(projects, p)
@@ -79,13 +85,14 @@ func Discover(ctx context.Context, opts Options) ([]Project, []error) {
 
 // FindRepoDirs walks root up to depth levels and returns directories that
 // contain a .git entry (directory for normal repos, file for linked worktrees
-// and submodules). It does not descend into a repo once found.
+// and submodules). It keeps walking below a repo so nested repositories and
+// submodules are found too, still bounded by depth and the exclude list.
 func FindRepoDirs(root string, depth int, exclude []string) []string {
 	root = filepath.Clean(root)
-	if isRepo(root) {
-		return []string{root}
-	}
 	var found []string
+	if isRepo(root) {
+		found = append(found, root)
+	}
 	var walk func(dir string, level int)
 	walk = func(dir string, level int) {
 		entries, err := os.ReadDir(dir)
@@ -99,7 +106,6 @@ func FindRepoDirs(root string, depth int, exclude []string) []string {
 			p := filepath.Join(dir, e.Name())
 			if isRepo(p) {
 				found = append(found, p)
-				continue
 			}
 			if level < depth {
 				walk(p, level+1)
