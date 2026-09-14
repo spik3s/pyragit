@@ -95,12 +95,23 @@ func (s *Store) All() []*Worktree {
 	return out
 }
 
-// Apply stores a snapshot for its worktree. Unknown paths are ignored.
+// Apply stores a snapshot for its worktree. Unknown paths are ignored. The
+// worktree's branch, head and detached flag follow the snapshot so a checkout
+// made outside pyragit shows up without a rediscovery.
 func (s *Store) Apply(snap Snapshot) {
-	if w := s.byPath[snap.Path]; w != nil {
-		w.Snap = snap
-		w.Loaded = true
-		w.Loading = false
+	w := s.byPath[snap.Path]
+	if w == nil {
+		return
+	}
+	w.Snap = snap
+	w.Loaded = true
+	w.Loading = false
+	if snap.Err == nil {
+		w.Branch = snap.Status.Branch
+		w.Detached = snap.Status.Detached
+		if snap.Status.OID != "" {
+			w.Head = snap.Status.OID
+		}
 	}
 }
 

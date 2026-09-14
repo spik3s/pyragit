@@ -356,3 +356,27 @@ func TestPinProject(t *testing.T) {
 		t.Errorf("unpin failed:\n%s", view)
 	}
 }
+
+func TestBranchLabelFollowsCheckout(t *testing.T) {
+	root := fleet(t)
+	feat := filepath.Join(root, "one-worktrees", "feat")
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 120, Height: 24}, loadedMsg{store: store})
+	// Switch the linked worktree to a new branch outside pyragit, then let the
+	// watcher-style project event trigger a refresh (not a rediscovery).
+	run(t, feat, "checkout", "-q", "-b", "renamed")
+	m = drive(t, m, watchEventMsg{Kind: watch.KindProject, Path: filepath.Join(root, "one", ".git")})
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "└ renamed") || strings.Contains(view, "└ feat") {
+		t.Errorf("sidebar label did not follow checkout:\n%s", view)
+	}
+	run(t, feat, "checkout", "-q", "--detach")
+	m = drive(t, m, watchEventMsg{Kind: watch.KindProject, Path: filepath.Join(root, "one", ".git")})
+	view = ansi.Strip(m.View().Content)
+	if ok, _ := regexp.MatchString(`└ detached [0-9a-f]{7}`, view); !ok {
+		t.Errorf("sidebar label did not follow detach:\n%s", view)
+	}
+}

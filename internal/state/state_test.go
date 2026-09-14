@@ -91,6 +91,23 @@ func TestLoadAndRefreshAll(t *testing.T) {
 	}
 }
 
+func TestApplyUpdatesBranch(t *testing.T) {
+	root := fleet(t)
+	feat := filepath.Join(root, "one-worktrees", "feat")
+	s, _ := Load(context.Background(), config.Default(root))
+	run(t, feat, "checkout", "-q", "-b", "renamed")
+	s.Apply(Refresh(context.Background(), feat, "main"))
+	w := s.Get(feat)
+	if w.Branch != "renamed" || w.Detached {
+		t.Errorf("branch not updated: %+v", w.Worktree)
+	}
+	run(t, feat, "checkout", "-q", "--detach")
+	s.Apply(Refresh(context.Background(), feat, "main"))
+	if w.Branch != "" || !w.Detached || w.Head == "" {
+		t.Errorf("detached state not updated: %+v", w.Worktree)
+	}
+}
+
 func TestRefreshMissingDir(t *testing.T) {
 	snap := Refresh(context.Background(), "/nonexistent/path", "main")
 	if snap.Err == nil {
