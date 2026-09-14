@@ -53,23 +53,23 @@ func drive(t *testing.T, m tea.Model, msgs ...tea.Msg) tea.Model {
 	for len(queue) > 0 {
 		msg := queue[0]
 		queue = queue[1:]
-		var cmd tea.Cmd
-		m, cmd = m.Update(msg)
-		if cmd == nil {
-			continue
-		}
-		out := cmd()
-		switch o := out.(type) {
-		case nil:
-		case tea.BatchMsg:
-			for _, c := range o {
+		// Batches may nest; expand them instead of feeding them to Update.
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
 				if c != nil {
 					if r := c(); r != nil {
 						queue = append(queue, r)
 					}
 				}
 			}
-		default:
+			continue
+		}
+		var cmd tea.Cmd
+		m, cmd = m.Update(msg)
+		if cmd == nil {
+			continue
+		}
+		if out := cmd(); out != nil {
 			queue = append(queue, out)
 		}
 	}
@@ -378,5 +378,24 @@ func TestBranchLabelFollowsCheckout(t *testing.T) {
 	view = ansi.Strip(m.View().Content)
 	if ok, _ := regexp.MatchString(`└ detached [0-9a-f]{7}`, view); !ok {
 		t.Errorf("sidebar label did not follow detach:\n%s", view)
+	}
+}
+
+func TestDiskSizes(t *testing.T) {
+	root := fleet(t)
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	m := drive(t, app, tea.WindowSizeMsg{Width: 160, Height: 24}, loadedMsg{store: store})
+	view := ansi.Strip(m.View().Content)
+	if ok, _ := regexp.MatchString(`▾ one \(2\)\s+\d+K`, view); !ok {
+		t.Errorf("project total size missing:\n%s", view)
+	}
+	if ok, _ := regexp.MatchString(`◆ main.*\d+K│`, view); !ok {
+		t.Errorf("worktree size missing:\n%s", view)
+	}
+	if !strings.Contains(view, "KB on disk (incl. .git)") {
+		t.Errorf("status size missing:\n%s", view)
 	}
 }

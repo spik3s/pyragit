@@ -37,10 +37,33 @@ func (s Snapshot) LastActivity() time.Time {
 // Worktree is a git worktree plus its latest snapshot.
 type Worktree struct {
 	git.Worktree
-	Project *Project
-	Snap    Snapshot
-	Loaded  bool
-	Loading bool
+	Project   *Project
+	Snap      Snapshot
+	Loaded    bool
+	Loading   bool
+	Size      int64 // bytes on disk; SizeKnown reports whether it has been measured
+	SizeKnown bool
+}
+
+// TotalSize sums the measured sizes of a project's worktrees. known is false
+// while any worktree is still unmeasured.
+func (p *Project) TotalSize() (total int64, known bool) {
+	known = true
+	for _, w := range p.Worktrees {
+		if !w.SizeKnown {
+			known = false
+			continue
+		}
+		total += w.Size
+	}
+	return total, known
+}
+
+// SetSize records a measured disk size.
+func (s *Store) SetSize(path string, size int64) {
+	if w := s.byPath[path]; w != nil {
+		w.Size, w.SizeKnown = size, true
+	}
 }
 
 // IsMain reports whether this is the repository's primary worktree.
@@ -142,6 +165,7 @@ func (s *Store) Replace(projects []discovery.Project, baseFor func(discovery.Pro
 		for _, w := range p.Worktrees {
 			if ow := old[w.Path]; ow != nil {
 				w.Snap, w.Loaded, w.Loading = ow.Snap, ow.Loaded, ow.Loading
+				w.Size, w.SizeKnown = ow.Size, ow.SizeKnown
 			}
 		}
 	}

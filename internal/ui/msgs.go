@@ -44,6 +44,32 @@ type diffKey struct {
 // refreshSem bounds concurrent git status runs across all refresh commands.
 var refreshSem = make(chan struct{}, 8)
 
+// sizeSem bounds concurrent du runs; they are disk-heavy.
+var sizeSem = make(chan struct{}, 2)
+
+type sizeMsg struct {
+	path string
+	size int64
+	err  error
+}
+
+func sizeCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		sizeSem <- struct{}{}
+		defer func() { <-sizeSem }()
+		n, err := state.DiskUsage(context.Background(), path)
+		return sizeMsg{path: path, size: n, err: err}
+	}
+}
+
+func sizeAllCmd(wts []*state.Worktree) tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(wts))
+	for _, w := range wts {
+		cmds = append(cmds, sizeCmd(w.Path))
+	}
+	return tea.Batch(cmds...)
+}
+
 func loadCmd(cfg config.Config) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()

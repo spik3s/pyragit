@@ -204,7 +204,7 @@ func (a App) runAction(id string) (tea.Model, tea.Cmd) {
 			wt.Loading = true
 		}
 		a.status = "rediscovering and refreshing all"
-		return a, tea.Batch(rediscoverCmd(a.cfg), refreshAllCmd(wts))
+		return a, tea.Batch(rediscoverCmd(a.cfg), refreshAllCmd(wts), sizeAllCmd(wts))
 	}
 	return a, nil
 }

@@ -183,6 +183,13 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 		if r.project.Pinned {
 			text += " " + t.BadgeDirty.Render("★")
 		}
+		if total, known := r.project.TotalSize(); known {
+			size := state.HumanSize(total)
+			nameW := w - ansi.StringWidth(size) - 1
+			if nameW >= 6 {
+				text = padRight(ansi.Truncate(text, nameW, "…"), nameW) + " " + t.Dim.Render(size)
+			}
+		}
 		text = padRight(ansi.Truncate(text, w, "…"), w)
 		if selected {
 			if focused {
@@ -217,6 +224,16 @@ func (s *sidebar) renderRow(t Theme, r sidebarRow, selected, focused bool, w int
 		prefix = "  ◆ "
 	case r.last:
 		prefix = "  └ "
+	}
+	// The size column is the first thing to go when the name would be squeezed.
+	if wt.SizeKnown {
+		size := state.HumanSize(wt.Size)
+		if w-len([]rune(prefix))-ansi.StringWidth(badges)-ansi.StringWidth(size)-2 >= 16 {
+			if badges != "" {
+				badges += " "
+			}
+			badges += t.Dim.Render(size)
+		}
 	}
 	bw := ansi.StringWidth(badges)
 	nameW := w - len([]rune(prefix)) - bw

@@ -138,6 +138,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.onLoaded(msg)
 	case snapshotMsg:
 		return a.onSnapshot(state.Snapshot(msg))
+	case sizeMsg:
+		if a.store != nil && msg.err == nil {
+			a.store.SetSize(msg.path, msg.size)
+		}
+		return a, nil
 	case diffMsg:
 		if msg.key == a.diff.key {
 			if msg.err != nil {
@@ -330,7 +335,7 @@ func (a App) onLoaded(msg loadedMsg) (tea.Model, tea.Cmd) {
 		watchCmd = waitWatchCmd(a.watcher)
 	}
 	a.rewatch()
-	return a, tea.Batch(refreshAllCmd(wts), cmd, watchCmd)
+	return a, tea.Batch(refreshAllCmd(wts), cmd, watchCmd, sizeAllCmd(wts))
 }
 
 // rewatch points the watcher at the current set of worktrees and repos.
@@ -405,7 +410,7 @@ func (a App) onRediscovered(msg rediscoveredMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	a.status = fmt.Sprintf("%d projects, %d worktrees", len(a.store.Projects), len(a.store.All()))
-	return a, tea.Batch(refreshAllCmd(fresh), a.onSelectionChanged())
+	return a, tea.Batch(refreshAllCmd(fresh), sizeAllCmd(fresh), a.onSelectionChanged())
 }
 
 func (a App) onSnapshot(snap state.Snapshot) (tea.Model, tea.Cmd) {
@@ -895,6 +900,13 @@ func worktreeSummary(w *state.Worktree, tab filesTab, sel *fileEntry) []string {
 	}
 	if !w.Snap.LastCommit.IsZero() {
 		out = append(out, "last commit "+ago(w.Snap.LastCommit))
+	}
+	if w.SizeKnown {
+		size := state.ExactSize(w.Size) + " on disk"
+		if w.IsMain() {
+			size += " (incl. .git)"
+		}
+		out = append(out, size)
 	}
 	if sel != nil && !sel.when.IsZero() {
 		switch tab {
