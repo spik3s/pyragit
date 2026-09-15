@@ -20,6 +20,9 @@ const (
 	promptNewWorktree
 	promptConfirm
 	promptPalette
+	promptCommit
+	promptAmend
+	promptStash
 )
 
 // prompt is a modal text input with an optional filterable choice list.
@@ -34,6 +37,7 @@ type prompt struct {
 	confirm  bool // y/N style; input is ignored
 	context  map[string]string
 	err      string
+	optional bool // enter with an empty value is allowed
 }
 
 func newPrompt() prompt {
@@ -51,6 +55,7 @@ func (p *prompt) open(kind promptKind, title string, choices []string, initial s
 	p.confirm = false
 	p.err = ""
 	p.context = map[string]string{}
+	p.optional = false
 	p.input.SetValue(initial)
 	p.input.Placeholder = ""
 	p.refilter()
@@ -127,7 +132,7 @@ func (p *prompt) update(msg tea.KeyPressMsg) (tea.Cmd, *promptResultMsg) {
 		return nil, nil
 	case keyEnter:
 		v := p.value()
-		if v == "" {
+		if v == "" && !p.optional {
 			p.err = "value required"
 			return nil, nil
 		}

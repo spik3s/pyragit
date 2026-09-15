@@ -34,6 +34,14 @@ var actions = []action{
 	{"new-worktree", "New worktree…", "N"},
 	{"remove-worktree", "Remove worktree", "D"},
 	{"prune", "Prune worktrees", ""},
+	{"stage-all", "Stage all changes", ""},
+	{"unstage-all", "Unstage all changes", ""},
+	{"discard-all", "Discard all changes…", ""},
+	{"commit", "Commit…", ""},
+	{"amend", "Amend last commit…", ""},
+	{"stash", "Stash…", ""},
+	{"stash-untracked", "Stash including untracked…", ""},
+	{"stash-pop", "Stash pop (latest)", ""},
 	{"set-base", "Set base branch…", "b"},
 	{"editor", "Open in editor", "e"},
 	{"shell", "Open shell here", "s"},
@@ -154,6 +162,39 @@ func (a App) runAction(id string) (tea.Model, tea.Cmd) {
 				onLine("done")
 				return nil
 			})
+	case "stage-all":
+		return a.quickOp("stage all", w, func(ctx context.Context) error { return git.StageAll(ctx, w.Path) })
+	case "unstage-all":
+		return a.quickOp("unstage all", w, func(ctx context.Context) error { return git.UnstageAll(ctx, w.Path) })
+	case "discard-all":
+		if !w.Loaded || !w.Snap.Status.Dirty() {
+			a.status = "nothing to discard"
+			return a, nil
+		}
+		a.prompt.openConfirm(promptConfirm, fmt.Sprintf("Discard all %d changes in %s? Untracked files will be deleted.", len(w.Snap.Status.Files), w.Branch),
+			map[string]string{"action": "discard-all"})
+		return a, nil
+	case "commit":
+		if w.Loaded && w.Snap.Status.StagedCount() == 0 {
+			a.status = "nothing staged; press space or a to stage"
+			return a, nil
+		}
+		return a, a.prompt.open(promptCommit, "Commit message", nil, "")
+	case "amend":
+		return a, a.prompt.open(promptAmend, "Amend last commit (message)", nil, git.HeadSubject(context.Background(), w.Path))
+	case "stash", "stash-untracked":
+		if w.Loaded && !w.Snap.Status.Dirty() {
+			a.status = "nothing to stash"
+			return a, nil
+		}
+		cmd := a.prompt.open(promptStash, "Stash message (optional)", nil, "")
+		a.prompt.optional = true
+		if id == "stash-untracked" {
+			a.prompt.context["untracked"] = "1"
+		}
+		return a, cmd
+	case "stash-pop":
+		return a.quickOp("stash pop", w, func(ctx context.Context) error { return git.StashPop(ctx, w.Path, "stash@{0}") })
 	case "set-base":
 		return a, branchesCmd(w.Path)
 	case "editor":
@@ -209,6 +250,92 @@ func (a App) runAction(id string) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// quickOp runs a short git command quietly and refreshes the worktree.
+func (a App) quickOp(name string, w *state.Worktree, fn func(ctx context.Context) error) (tea.Model, tea.Cmd) {
+	return a.beginOp(name, w.Path, true, followUp{refresh: []*state.Worktree{w}},
+		func(ctx context.Context, onLine func(string)) error { return fn(ctx) })
+}
+
+// onFilesEditKey handles staging, discarding, committing and stashing keys
+// in the files pane. handled is false when the key is not one of them.
+func (a App) onFilesEditKey(k string) (tea.Model, tea.Cmd, bool) {
+	w := a.sidebar.selectedWorktree()
+	if w == nil {
+		return a, nil, false
+	}
+	if a.op != nil && a.op.running {
+		switch k {
+		case keyStage, keyStageAll, keyUnstageAl, keyDiscard, keyDiscardAl, keyCommit, keyStash, keyStashU:
+			a.status = "wait for " + a.op.name + " to finish"
+			return a, nil, true
+		}
+	}
+	e := a.files.selected()
+	switch a.files.tab {
+	case tabChanges:
+		switch k {
+		case keyStage:
+			if e == nil {
+				return a, nil, true
+			}
+			path := e.path
+			if e.mode == git.DiffStaged {
+				m, cmd := a.quickOp("unstage "+path, w, func(ctx context.Context) error { return git.Unstage(ctx, w.Path, path) })
+				return m, cmd, true
+			}
+			m, cmd := a.quickOp("stage "+path, w, func(ctx context.Context) error { return git.Stage(ctx, w.Path, path) })
+			return m, cmd, true
+		case keyStageAll:
+			m, cmd := a.runAction("stage-all")
+			return m, cmd, true
+		case keyUnstageAl:
+			m, cmd := a.runAction("unstage-all")
+			return m, cmd, true
+		case keyDiscard:
+			if e == nil {
+				return a, nil, true
+			}
+			ctx := map[string]string{"action": "discard-file", "path": e.path}
+			title := "Discard changes to " + e.path + "?"
+			if e.mode == git.DiffUntracked {
+				ctx["untracked"] = "1"
+				title = "Delete untracked " + e.path + "?"
+			}
+			a.prompt.openConfirm(promptConfirm, title, ctx)
+			return a, nil, true
+		case keyDiscardAl:
+			m, cmd := a.runAction("discard-all")
+			return m, cmd, true
+		case keyCommit:
+			m, cmd := a.runAction("commit")
+			return m, cmd, true
+		case keyStash:
+			m, cmd := a.runAction("stash")
+			return m, cmd, true
+		case keyStashU:
+			m, cmd := a.runAction("stash-untracked")
+			return m, cmd, true
+		}
+	case tabStash:
+		if e == nil {
+			return a, nil, false
+		}
+		ref := e.hash
+		switch k {
+		case keyStage:
+			m, cmd := a.quickOp("stash pop "+ref, w, func(ctx context.Context) error { return git.StashPop(ctx, w.Path, ref) })
+			return m, cmd, true
+		case keyStageAll:
+			m, cmd := a.quickOp("stash apply "+ref, w, func(ctx context.Context) error { return git.StashApply(ctx, w.Path, ref) })
+			return m, cmd, true
+		case keyDiscard:
+			a.prompt.openConfirm(promptConfirm, "Drop "+ref+" ("+e.label+")?", map[string]string{"action": "stash-drop", "ref": ref})
+			return a, nil, true
+		}
+	}
+	return a, nil, false
+}
+
 // beginOp starts an operation and shows the output pane unless quiet.
 func (a App) beginOp(name, dir string, quiet bool, follow followUp, fn opFunc) (tea.Model, tea.Cmd) {
 	o, cmd := startOp(name, dir, quiet, follow, fn)
@@ -246,6 +373,9 @@ func (a App) onOp(ev opEvent) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	a.status = o.name + " done"
+	if o.quiet && len(o.lines) > 0 {
+		a.status = o.lines[len(o.lines)-1]
+	}
 	var cmds []tea.Cmd
 	for _, w := range o.follow.refresh {
 		w.Loading = true
@@ -264,9 +394,71 @@ func (a App) onOp(ev opEvent) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
+func (a App) onEditPrompt(msg promptResultMsg, w *state.Worktree) (tea.Model, tea.Cmd, bool) {
+	switch msg.kind {
+	case promptCommit, promptAmend:
+		message, amend := msg.value, msg.kind == promptAmend
+		name := "commit"
+		if amend {
+			name = "amend"
+		}
+		m, cmd := a.beginOp(name, w.Path, true, followUp{refresh: []*state.Worktree{w}},
+			func(ctx context.Context, onLine func(string)) error {
+				out, err := git.CreateCommit(ctx, w.Path, message, amend)
+				if out != "" {
+					onLine(out)
+				}
+				if err == nil {
+					onLine("committed: " + git.HeadSubject(ctx, w.Path))
+				}
+				return err
+			})
+		return m, cmd, true
+	case promptStash:
+		message, untracked := msg.value, msg.context["untracked"] == "1"
+		m, cmd := a.beginOp("stash", w.Path, true, followUp{refresh: []*state.Worktree{w}},
+			func(ctx context.Context, onLine func(string)) error {
+				out, err := git.StashPush(ctx, w.Path, message, untracked)
+				if out != "" {
+					onLine(out)
+				}
+				return err
+			})
+		return m, cmd, true
+	case promptConfirm:
+		if !msg.yes {
+			return a, nil, true
+		}
+		switch msg.context["action"] {
+		case "discard-file":
+			path, untracked := msg.context["path"], msg.context["untracked"] == "1"
+			m, cmd := a.quickOp("discard "+path, w, func(ctx context.Context) error {
+				if untracked {
+					return git.DeleteUntracked(ctx, w.Path, path)
+				}
+				return git.DiscardFile(ctx, w.Path, path)
+			})
+			return m, cmd, true
+		case "discard-all":
+			m, cmd := a.quickOp("discard all", w, func(ctx context.Context) error { return git.DiscardAll(ctx, w.Path) })
+			return m, cmd, true
+		case "stash-drop":
+			ref := msg.context["ref"]
+			m, cmd := a.quickOp("drop "+ref, w, func(ctx context.Context) error { return git.StashDrop(ctx, w.Path, ref) })
+			return m, cmd, true
+		}
+	}
+	return a, nil, false
+}
+
 // onActionPrompt handles prompt results for operations.
 func (a App) onActionPrompt(msg promptResultMsg) (tea.Model, tea.Cmd) {
 	w := a.sidebar.selectedWorktree()
+	if w != nil {
+		if m, cmd, handled := a.onEditPrompt(msg, w); handled {
+			return m, cmd
+		}
+	}
 	switch msg.kind {
 	case promptCheckout:
 		if w == nil {

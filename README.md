@@ -79,7 +79,12 @@ Commander style. The full list:
 | `enter` | open the selection in the next pane |
 | `space` `z` | collapse or expand a project |
 | `*` | pin or unpin a project so it stays at the top of the list |
-| `1` `2` `3` | Changes, vs Base, Log tab |
+| `1` `2` `3` `4` | Changes, vs Base, Log, Stashes tab |
+| `space` | in Changes: stage or unstage the file; in Stashes: pop the stash |
+| `a` `A` | stage all, unstage all; in Stashes `a` applies |
+| `x` `X` | discard the file, discard all (both confirm); in Stashes `x` drops |
+| `C` | commit staged changes (amend is in the palette) |
+| `t` `T` | stash, stash including untracked files |
 | `d` `u` | half page down or up in the diff |
 | `w` | toggle whitespace-insensitive diff |
 | `/` | filter projects and branches |
@@ -131,8 +136,8 @@ rediscovery.
 
 ## Not in this version
 
-Staging, committing, stashing, hunk selection, conflict resolution, rebase and
-merge UIs, side-by-side diffs, Windows.
+Hunk-level staging, conflict resolution, rebase and merge UIs, side-by-side
+diffs, Windows.
 
 ## Development
 

@@ -158,6 +158,17 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.onLog(msg)
 	case branchesMsg:
 		return a.onBranches(msg)
+	case stashListMsg:
+		w := a.sidebar.selectedWorktree()
+		if w == nil || w.Path != msg.worktree || a.files.tab != tabStash {
+			return a, nil
+		}
+		if msg.err != nil {
+			a.files.setMessage(w, msg.err.Error())
+		} else {
+			a.files.setStashes(w, msg.stashes)
+		}
+		return a, a.loadDiffForSelection()
 	case promptResultMsg:
 		return a.onPromptResult(msg)
 	case watchEventMsg:
@@ -458,6 +469,12 @@ func (a *App) onSelectionChanged() tea.Cmd {
 		a.diff.title = ""
 		a.diff.setContent(a.theme, "")
 		return logCmd(w.Path, w.Project.BaseBranch, 200)
+	case tabStash:
+		a.files.setMessage(w, "loading…")
+		a.diff.key = diffKey{}
+		a.diff.title = ""
+		a.diff.setContent(a.theme, "")
+		return stashListCmd(w.Path)
 	}
 	return nil
 }
@@ -502,6 +519,15 @@ func (a *App) loadDiffForSelection() tea.Cmd {
 		a.diff.title = fmt.Sprintf("%s · %s · %s (%s)", short(e.hash), e.author, smartTime(e.when, time.Now()), ago(e.when))
 		a.diff.loading = true
 		return showCmd(key)
+	case tabStash:
+		key := diffKey{worktree: a.files.worktree, tab: a.files.tab, rev: e.hash, ignoreWS: a.diff.ignoreWS}
+		if key == a.diff.key && !a.diff.loading {
+			return nil
+		}
+		a.diff.key = key
+		a.diff.title = e.hash + " · " + ago(e.when)
+		a.diff.loading = true
+		return stashShowCmd(key)
 	}
 	return nil
 }
@@ -553,7 +579,7 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.focus--
 		}
 		return a, nil
-	case keyTab1, keyTab2, keyTab3:
+	case keyTab1, keyTab2, keyTab3, keyTab4:
 		a.files.tab = filesTab(k[0] - '1')
 		return a, a.onSelectionChanged()
 	case keyWS:
@@ -576,6 +602,12 @@ func (a App) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			a.persist()
 		}
 		return a, nil
+	}
+	// Files-pane editing keys take priority over global action keys.
+	if a.focus == paneFiles {
+		if m, cmd, handled := a.onFilesEditKey(k); handled {
+			return m, cmd
+		}
 	}
 	// Action keys apply everywhere except where a pane uses the same key.
 	if act := actionByKey(k); act != nil && !(a.focus == paneDiff && (k == "d" || k == "u")) {

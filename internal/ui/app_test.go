@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/spik3s/pyragit/internal/config"
+	"github.com/spik3s/pyragit/internal/git"
 	"github.com/spik3s/pyragit/internal/state"
 	"github.com/spik3s/pyragit/internal/uistate"
 	"github.com/spik3s/pyragit/internal/watch"
@@ -115,7 +116,7 @@ func TestAppRendersFleet(t *testing.T) {
 	if !strings.Contains(view, "+new") {
 		t.Errorf("diff did not follow selection:\n%s", view)
 	}
-	if !strings.Contains(view, "↵ Diff ") || !strings.Contains(view, "y Copy path ") || strings.Contains(view, "f Fetch ") {
+	if !strings.Contains(view, "space Stage/Unstage ") || !strings.Contains(view, "C Commit ") || strings.Contains(view, "f Fetch ") {
 		t.Errorf("files key bar wrong:\n%s", view)
 	}
 	m = drive(t, m, key("l"))
@@ -398,4 +399,122 @@ func TestDiskSizes(t *testing.T) {
 	if !strings.Contains(view, "KB on disk (incl. .git)") {
 		t.Errorf("status size missing:\n%s", view)
 	}
+}
+
+func TestStageDiscardCommitStashFlow(t *testing.T) {
+	tickInterval = 5 * time.Millisecond
+	t.Cleanup(func() { tickInterval = time.Second })
+	root := fleet(t)
+	one := filepath.Join(root, "one")
+	feat := filepath.Join(root, "one-worktrees", "feat")
+	run(t, one, "config", "user.email", "t@t")
+	run(t, one, "config", "user.name", "t")
+	cfg := config.Default(root)
+	app := New(cfg, "/dev/null", false)
+	app.noWatch = true
+	store, _ := state.Load(context.Background(), cfg)
+	// Select feat, focus the files pane. Entries: Unstaged a.txt, Untracked new.txt.
+	m := drive(t, app, tea.WindowSizeMsg{Width: 140, Height: 30}, loadedMsg{store: store}, key("j"), key("l"))
+	view := func() string { return ansi.Strip(m.View().Content) }
+	if !strings.Contains(view(), "space Stage/Unstage") {
+		t.Fatalf("changes key bar missing:\n%s", view())
+	}
+
+	// Stage a.txt with space; cursor follows it into the Staged section.
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if v := view(); !strings.Contains(v, "Staged (1)") || strings.Contains(v, "Unstaged (1)") {
+		t.Fatalf("stage failed:\n%s", v)
+	}
+	fp := m.(App).files
+	if e := fp.selected(); e == nil || e.path != "a.txt" || e.mode != git.DiffStaged {
+		t.Errorf("cursor did not follow staged file: %+v", e)
+	}
+	// Space again unstages it.
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if v := view(); !strings.Contains(v, "Unstaged (1)") || strings.Contains(v, "Staged (1)") {
+		t.Fatalf("unstage failed:\n%s", v)
+	}
+	// a stages all, A unstages all.
+	m = drive(t, m, key("a"))
+	if v := view(); !strings.Contains(v, "Staged (2)") {
+		t.Fatalf("stage all failed:\n%s", v)
+	}
+	m = drive(t, m, key("A"))
+	if v := view(); !strings.Contains(v, "Untracked (1)") || strings.Contains(v, "Staged") {
+		t.Fatalf("unstage all failed:\n%s", v)
+	}
+	// Discard the untracked file: move to it, x, confirm.
+	m = drive(t, m, key("j"))
+	m = drive(t, m, key("x"))
+	if v := view(); !strings.Contains(v, "Delete untracked new.txt?") {
+		t.Fatalf("confirm missing:\n%s", v)
+	}
+	m = drive(t, m, key("y"))
+	if _, err := os.Stat(filepath.Join(feat, "new.txt")); err == nil {
+		t.Error("new.txt not deleted")
+	}
+	// Commit with nothing staged is refused; stage then commit.
+	m = drive(t, m, key("C"))
+	if !strings.Contains(view(), "nothing staged") {
+		t.Errorf("commit guard missing:\n%s", view())
+	}
+	m = drive(t, m, key("a"))
+	m = drive(t, m, key("C"))
+	if !strings.Contains(view(), "Commit message") {
+		t.Fatalf("commit prompt missing:\n%s", view())
+	}
+	m = drive(t, m, key("d"), key("o"), key("n"), key("e"), tea.KeyPressMsg{Code: tea.KeyEnter})
+	if v := view(); !strings.Contains(v, "working tree clean") || !strings.Contains(v, "committed: done") {
+		t.Fatalf("commit failed:\n%s", v)
+	}
+	if git.HeadSubject(context.Background(), feat) != "done" {
+		t.Errorf("subject %q", git.HeadSubject(context.Background(), feat))
+	}
+	// Stash a new change with an empty message, view it in the Stashes tab, pop it.
+	os.WriteFile(filepath.Join(feat, "a.txt"), []byte("stash me\n"), 0o644)
+	m = drive(t, m, key("r"))
+	m = drive(t, m, key("t"))
+	if !strings.Contains(view(), "Stash message (optional)") {
+		t.Fatalf("stash prompt missing:\n%s", view())
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(view(), "working tree clean") {
+		t.Fatalf("stash failed:\n%s", view())
+	}
+	m = drive(t, m, key("4"))
+	if v := view(); !strings.Contains(v, "stash@{0}") || !strings.Contains(v, "+stash me") || !strings.Contains(v, "space Pop") {
+		t.Fatalf("stash tab wrong:\n%s", v)
+	}
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if v := view(); !strings.Contains(v, "no stashes") {
+		t.Fatalf("pop failed:\n%s", v)
+	}
+	m = drive(t, m, key("1"))
+	if !strings.Contains(view(), "Unstaged (1)") {
+		t.Fatalf("popped change missing:\n%s", view())
+	}
+	// Stash again, drop it with confirmation, then discard all.
+	m = drive(t, m, key("T"))
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = drive(t, m, key("4"))
+	m = drive(t, m, key("x"))
+	if !strings.Contains(view(), "Drop stash@{0}") {
+		t.Fatalf("drop confirm missing:\n%s", view())
+	}
+	m = drive(t, m, key("y"))
+	if !strings.Contains(view(), "no stashes") {
+		t.Fatalf("drop failed:\n%s", view())
+	}
+	os.WriteFile(filepath.Join(feat, "a.txt"), []byte("discard me\n"), 0o644)
+	m = drive(t, m, key("1"))
+	m = drive(t, m, key("r"))
+	m = drive(t, m, key("X"))
+	if !strings.Contains(view(), "Discard all 1 changes") {
+		t.Fatalf("discard all confirm missing:\n%s", view())
+	}
+	m = drive(t, m, key("y"))
+	if !strings.Contains(view(), "working tree clean") {
+		t.Fatalf("discard all failed:\n%s", view())
+	}
+	t.Log("\n" + view())
 }

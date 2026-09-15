@@ -16,8 +16,15 @@ var (
 		{"/", "Filter"}, {":", "More"},
 	}
 	filesHints = []keyHint{
-		{"↵", "Diff"}, {"1", "Changes"}, {"2", "vs Base"}, {"3", "Log"}, {"w", "Whitespace"},
+		{"↵", "Diff"}, {"1", "Changes"}, {"2", "vs Base"}, {"3", "Log"}, {"4", "Stashes"}, {"w", "Whitespace"},
 		{"r", "Refresh"}, {"e", "Edit"}, {"y", "Copy path"}, {":", "More"},
+	}
+	changesHints = []keyHint{
+		{"space", "Stage/Unstage"}, {"a", "Stage all"}, {"A", "Unstage all"}, {"x", "Discard"}, {"X", "Discard all"},
+		{"C", "Commit"}, {"t", "Stash"}, {"T", "Stash +untracked"}, {"4", "Stashes"}, {"w", "Whitespace"}, {":", "More"},
+	}
+	stashHints = []keyHint{
+		{"space", "Pop"}, {"a", "Apply"}, {"x", "Drop"}, {"↵", "Diff"}, {"1", "Changes"}, {":", "More"},
 	}
 	diffHints = []keyHint{
 		{"j/k", "Scroll"}, {"d/u", "Page"}, {"g/G", "Top/End"}, {"w", "Whitespace"},
@@ -51,7 +58,14 @@ func (a App) hints() []keyHint {
 	case paneSidebar:
 		hs = append(hs, sidebarHints...)
 	case paneFiles:
-		hs = append(hs, filesHints...)
+		switch a.files.tab {
+		case tabChanges:
+			hs = append(hs, changesHints...)
+		case tabStash:
+			hs = append(hs, stashHints...)
+		default:
+			hs = append(hs, filesHints...)
+		}
 	case paneDiff:
 		hs = append(hs, diffHints...)
 	}

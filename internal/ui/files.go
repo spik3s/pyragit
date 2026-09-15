@@ -17,6 +17,7 @@ const (
 	tabChanges filesTab = iota
 	tabBase
 	tabLog
+	tabStash
 )
 
 func (ft filesTab) String() string {
@@ -27,6 +28,8 @@ func (ft filesTab) String() string {
 		return "vs Base"
 	case tabLog:
 		return "Log"
+	case tabStash:
+		return "Stashes"
 	}
 	return "?"
 }
@@ -56,6 +59,17 @@ type filesPane struct {
 }
 
 func (f *filesPane) setChanges(wt *state.Worktree) {
+	// Remember the selection so it survives a refresh of the same worktree.
+	var keepPath string
+	var keepMode git.DiffMode
+	keepIdx := f.cursor
+	if f.worktree == wt.Path {
+		if e := f.selected(); e != nil {
+			keepPath, keepMode = e.path, e.mode
+		}
+	} else {
+		keepIdx = 0
+	}
 	f.worktree = wt.Path
 	f.entries = f.entries[:0]
 	f.title = ""
@@ -106,7 +120,59 @@ func (f *filesPane) setChanges(wt *state.Worktree) {
 		f.entries = append(f.entries, fileEntry{header: true, label: "working tree clean"})
 	}
 	f.cursor = 0
-	f.offset = 0
+	f.selectFirst()
+	if keepPath != "" {
+		f.reselect(keepPath, keepMode, keepIdx)
+	}
+	f.clamp()
+}
+
+// reselect puts the cursor on path (preferring the same mode), else on the
+// nearest selectable entry to idx.
+func (f *filesPane) reselect(path string, mode git.DiffMode, idx int) {
+	best := -1
+	for i, e := range f.entries {
+		if e.header || e.path != path {
+			continue
+		}
+		if e.mode == mode {
+			f.cursor = i
+			return
+		}
+		if best < 0 {
+			best = i
+		}
+	}
+	if best >= 0 {
+		f.cursor = best
+		return
+	}
+	if idx >= len(f.entries) {
+		idx = len(f.entries) - 1
+	}
+	for i := idx; i >= 0; i-- {
+		if !f.entries[i].header {
+			f.cursor = i
+			return
+		}
+	}
+	f.selectFirst()
+}
+
+func (f *filesPane) setStashes(wt *state.Worktree, stashes []git.Stash) {
+	f.worktree = wt.Path
+	f.title = ""
+	f.entries = f.entries[:0]
+	if len(stashes) == 0 {
+		f.entries = append(f.entries, fileEntry{header: true, label: "no stashes"})
+	}
+	for _, s := range stashes {
+		f.entries = append(f.entries, fileEntry{
+			label: fmt.Sprintf("%s %s", s.Ref, s.Message),
+			hash:  s.Ref, status: 's', when: s.When,
+		})
+	}
+	f.cursor, f.offset = 0, 0
 	f.selectFirst()
 }
 
@@ -213,7 +279,7 @@ func (f *filesPane) view(t Theme, focused bool) string {
 		w = 4
 	}
 	var tabs []string
-	for i, name := range []string{"1 Changes", "2 vs Base", "3 Log"} {
+	for i, name := range []string{"1 Changes", "2 vs Base", "3 Log", "4 Stashes"} {
 		if filesTab(i) == f.tab {
 			tabs = append(tabs, t.TabActive.Render(name))
 		} else {
@@ -274,6 +340,8 @@ func statusRune(s byte) rune {
 		return ' '
 	case 'c':
 		return '•'
+	case 's':
+		return '≡'
 	}
 	return rune(s)
 }

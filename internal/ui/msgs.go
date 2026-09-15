@@ -184,6 +184,26 @@ func branchesCmd(worktree string) tea.Cmd {
 	}
 }
 
+type stashListMsg struct {
+	worktree string
+	stashes  []git.Stash
+	err      error
+}
+
+func stashListCmd(worktree string) tea.Cmd {
+	return func() tea.Msg {
+		ss, err := git.StashList(context.Background(), worktree)
+		return stashListMsg{worktree: worktree, stashes: ss, err: err}
+	}
+}
+
+func stashShowCmd(key diffKey) tea.Cmd {
+	return func() tea.Msg {
+		out, err := git.StashShow(context.Background(), key.worktree, key.rev, key.ignoreWS)
+		return diffMsg{key: key, content: out, err: err}
+	}
+}
+
 type savedConfigMsg struct{ err error }
 
 func saveConfigCmd(path string, cfg config.Config) tea.Cmd {
