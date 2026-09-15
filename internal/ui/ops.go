@@ -106,6 +106,7 @@ type outputPane struct {
 	height  int
 	lines   []string
 	op      *op
+	follow  bool // keep the newest line in view as output streams in
 }
 
 func newOutputPane() outputPane {
@@ -122,6 +123,7 @@ func (o *outputPane) resize(w, h int) {
 func (o *outputPane) reset(op *op) {
 	o.op = op
 	o.lines = o.lines[:0]
+	o.follow = true
 	o.render()
 }
 
@@ -134,13 +136,12 @@ func (o *outputPane) append(line string) {
 }
 
 func (o *outputPane) render() {
-	atBottom := o.vp.YOffset() >= max(len(o.lines)-o.vp.Height(), 0)
 	if len(o.lines) == 0 {
 		o.vp.SetContent("")
 	} else {
 		o.vp.SetContent(strings.Join(o.lines, "\n"))
 	}
-	if atBottom {
+	if o.follow {
 		o.vp.GotoBottom()
 	}
 }
